@@ -199,7 +199,7 @@ describe('reset', () => {
       const { rows } = await db.pool.query<{ n: string }>('select count(*)::text as n from fans')
       expect(rows[0]?.n).toBe('0')
       const { rows: applied } = await db.pool.query<{ n: string }>('select count(*)::text as n from _migrations')
-      expect(applied[0]?.n).toBe('4')
+      expect(applied[0]?.n).toBe('5')
     } finally {
       await db.pool.end()
     }

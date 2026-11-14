@@ -29,6 +29,7 @@ export {
   type MonthlyAwardResult,
 } from './monthly.js'
 export { HandleTakenError, createFan, type CreateFanInput } from './fans.js'
+export { recordTermsAcceptance, touchLastSeen } from './consent.js'
 export {
   detachIdentity,
   linkIdentity,
