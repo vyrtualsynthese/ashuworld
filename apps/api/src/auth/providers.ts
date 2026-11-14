@@ -24,10 +24,25 @@ export interface ExchangeInput {
   redirectUri: string
 }
 
+/**
+ * What a completed exchange proved.
+ *
+ * The profile is the identity itself. `verifiedActions` names the one-time proofs the
+ * grant carried — Twitch's follow among them — and is empty for a provider that proves
+ * nothing beyond the identity, such as the dev provider.
+ */
+export interface ExchangeResult {
+  profile: IdentityProfile
+  /** One-time actions this grant verified, e.g. ['twitch.follow']. */
+  verifiedActions: string[]
+  /** A grant to keep for later re-checks. Twitch's fan grant is not kept in this plan. */
+  refreshToken?: string
+}
+
 export interface OAuthProvider {
   name: ProviderName
   authorizeUrl(input: AuthorizeInput): string
-  exchange(input: ExchangeInput): Promise<IdentityProfile>
+  exchange(input: ExchangeInput): Promise<ExchangeResult>
 }
 
 /**
@@ -81,10 +96,13 @@ export function createDevProvider(): OAuthProvider {
         )
       }
       return {
-        provider: 'dev',
-        externalId: `dev:${code}`,
-        displayHandle: code,
-        displayName: code,
+        profile: {
+          provider: 'dev',
+          externalId: `dev:${code}`,
+          displayHandle: code,
+          displayName: code,
+        },
+        verifiedActions: [],
       }
     },
   }
