@@ -1,6 +1,7 @@
 import { Writable } from 'node:stream'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FastifyInstance } from 'fastify'
+import type { Pool } from 'pg'
 import type { GameConfig } from '@ashuworld/gameconfig'
 import {
   awardOnce,
@@ -9,6 +10,7 @@ import {
   ensureIdentity,
   eraseFan,
   linkIdentity,
+  monthKey,
   withTransaction,
   type Queryable,
 } from '@ashuworld/ledger'
@@ -85,9 +87,10 @@ async function withApp(
   run: (app: FastifyInstance) => Promise<void>,
   env: Partial<Env> = {},
   providers?: ProviderRegistry,
+  pool: Pool = db.pool,
 ): Promise<void> {
   const app = buildServer({
-    pool: db.pool,
+    pool,
     cfg,
     env: testEnv(env),
     ...(providers === undefined ? {} : { providers }),
@@ -242,7 +245,110 @@ async function login(
   return { cookie: sessionCookieOf(res), res }
 }
 
-async function count(table: 'fans' | 'provider_identities' | 'sessions' | 'oauth_handshakes'): Promise<number> {
+/**
+ * A Twitch door whose grant proves exactly what the test says it proves.
+ *
+ * The real provider reaches Twitch for a token, the account and the follow list. These
+ * tests are about what the callback does with a finished `ExchangeResult`, so the identity
+ * and the verified actions are written out and handed over through the injected registry.
+ */
+function twitchProvider(verifiedActions: string[]): OAuthProvider {
+  return {
+    name: 'twitch',
+    authorizeUrl: ({ state, redirectUri }) => {
+      const url = new URL(redirectUri)
+      url.searchParams.set('code', 'grant-1')
+      url.searchParams.set('state', state)
+      return url.toString()
+    },
+    exchange: async () => ({
+      profile: {
+        provider: 'twitch',
+        externalId: 't-1',
+        displayHandle: 'ashu',
+        displayName: 'Ashu',
+      },
+      verifiedActions,
+    }),
+  }
+}
+
+/** The registry holding one injected provider, so the routes only know that one. */
+function registryOf(provider: OAuthProvider): ProviderRegistry {
+  return { get: (name) => (name === provider.name ? provider : undefined) }
+}
+
+/** Runs the start redirect of a handshake and returns its state. */
+async function stateOfStart(app: FastifyInstance, url: string): Promise<string> {
+  const res = await app.inject({ method: 'GET', url })
+  if (res.statusCode !== 302) {
+    throw new Error(`start answered ${res.statusCode}: ${res.body}`)
+  }
+  return stateOf(res)
+}
+
+/** A whole login through the injected Twitch door, ending at the callback. */
+async function twitchLogin(app: FastifyInstance): Promise<Injected> {
+  const state = await stateOfStart(app, '/auth/twitch/start?purpose=login')
+  return callback(app, { state, code: 'grant-1', provider: 'twitch' })
+}
+
+/** A whole link through the injected Twitch door, started by the fan holding `cookie`. */
+async function twitchLink(app: FastifyInstance, cookie: string): Promise<Injected> {
+  const start = await app.inject({
+    method: 'GET',
+    url: '/auth/twitch/start?purpose=link',
+    headers: cookieHeader(cookie),
+  })
+  if (start.statusCode !== 302) {
+    throw new Error(`start answered ${start.statusCode}: ${start.body}`)
+  }
+  return callback(app, { state: stateOf(start), code: 'grant-1', provider: 'twitch', cookie })
+}
+
+interface OutboundEventRow {
+  event_id: string
+  payload: unknown
+}
+
+/** The queue rows the callback wrote, in the order they were inserted. */
+async function outboundEvents(): Promise<OutboundEventRow[]> {
+  const { rows } = await db.pool.query<OutboundEventRow>(
+    'select event_id, payload from inbound_events order by id',
+  )
+  return rows
+}
+
+/**
+ * The real pool, with only the queue write refused.
+ *
+ * A sign-in must survive a queue the api cannot write to, and the interesting case is the
+ * one where every other statement still works: the login transaction commits, the session
+ * row exists, and only the `inbound_events` insert fails. A stub for the whole pool would
+ * fail the sign-in first and prove nothing about the enqueue.
+ */
+function poolRefusingQueue(): Pool {
+  return new Proxy(db.pool, {
+    get(target, property, receiver) {
+      if (property === 'query') {
+        return (text: string, values?: unknown[]) => {
+          if (text.includes('insert into inbound_events')) {
+            return Promise.reject(new Error('the queue is down'))
+          }
+          return target.query(text, values)
+        }
+      }
+      // Everything else (notably `connect`, which `withTransaction` needs) is the pool's
+      // own method, bound to the pool so a proxy receiver cannot change what it touches.
+      const value = Reflect.get(target, property, receiver) as unknown
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+}
+
+async function count(
+  table: 'fans' | 'provider_identities' | 'sessions' | 'oauth_handshakes' | 'inbound_events',
+): Promise<number> {
   const { rows } = await db.pool.query<{ n: string }>(`select count(*)::text as n from ${table}`)
   return Number(rows[0]?.n ?? '0')
 }
@@ -1311,6 +1417,135 @@ describe('GET /auth/:provider/callback: link', () => {
       expect(rows[0]?.forfeited).toBe(true)
       expect(rows[0]?.balance).toBe(0)
     })
+  })
+})
+
+describe('GET /auth/:provider/callback: verified actions', () => {
+  it('queues the action the grant verified, under the sign-in event id', async () => {
+    await withApp(
+      async (app) => {
+        const res = await twitchLogin(app)
+
+        expect(res.statusCode).toBe(302)
+        expect(locationOf(res)).toBe('/account')
+        expect(sessionSetCookie(res)).toBeDefined()
+
+        const rows = await outboundEvents()
+        expect(rows).toHaveLength(1)
+        expect(rows[0]?.event_id).toBe(
+          `signin:twitch:t-1:twitch.follow:${monthKey(new Date())}`,
+        )
+        expect(rows[0]?.payload).toMatchObject({
+          kind: 'discovery',
+          provider: 'twitch',
+          externalId: 't-1',
+          displayHandle: 'ashu',
+          displayName: 'Ashu',
+          actions: ['twitch.follow'],
+        })
+      },
+      {},
+      registryOf(twitchProvider(['twitch.follow'])),
+    )
+  })
+
+  it('queues nothing when the grant verified no actions, and still sets the session', async () => {
+    await withApp(
+      async (app) => {
+        const res = await twitchLogin(app)
+
+        expect(res.statusCode).toBe(302)
+        expect(locationOf(res)).toBe('/account')
+        expect(sessionSetCookie(res)).toBeDefined()
+        expect(await count('sessions')).toBe(1)
+        expect(await outboundEvents()).toHaveLength(0)
+      },
+      {},
+      registryOf(twitchProvider([])),
+    )
+  })
+
+  it('still signs the fan in, logging once, when the queue write fails', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      await withApp(
+        async (app) => {
+          const res = await twitchLogin(app)
+
+          // The session was committed before the queue write, so the browser is signed
+          // in and the redirect still happens.
+          expect(res.statusCode).toBe(302)
+          expect(locationOf(res)).toBe('/account')
+          expect(sessionSetCookie(res)).toBeDefined()
+          expect(await count('sessions')).toBe(1)
+        },
+        {},
+        registryOf(twitchProvider(['twitch.follow'])),
+        poolRefusingQueue(),
+      )
+
+      expect(logged).toHaveBeenCalledTimes(1)
+      expect(logged).toHaveBeenCalledWith(
+        '[api] the sign-in event was not queued',
+        expect.any(Error),
+      )
+      expect(await outboundEvents()).toHaveLength(0)
+    } finally {
+      logged.mockRestore()
+    }
+  })
+
+  it('queues a link that attached the identity', async () => {
+    const fanId = await seedFan('ashu')
+    const cookie = await seedSession(fanId)
+
+    await withApp(
+      async (app) => {
+        const res = await twitchLink(app, cookie)
+
+        expect(res.statusCode).toBe(302)
+        expect(locationOf(res)).toBe('/account')
+        // A link already has a session; the event, not a second cookie, is the new fact.
+        expect(sessionSetCookie(res)).toBeUndefined()
+
+        const rows = await outboundEvents()
+        expect(rows).toHaveLength(1)
+        expect(rows[0]?.event_id).toBe(
+          `signin:twitch:t-1:twitch.follow:${monthKey(new Date())}`,
+        )
+        expect(rows[0]?.payload).toMatchObject({
+          kind: 'discovery',
+          provider: 'twitch',
+          externalId: 't-1',
+        })
+      },
+      {},
+      registryOf(twitchProvider(['twitch.follow'])),
+    )
+  })
+
+  it('queues nothing for a detached identity, which asks the fan to re-attach', async () => {
+    // The state a detach leaves: the identity keeps its history and has no fan.
+    await db.pool.query(
+      `insert into provider_identities
+         (provider, external_id, display_handle, first_linked_at)
+       values ('twitch', 't-1', 'ashu', now())`,
+    )
+
+    await withApp(
+      async (app) => {
+        const res = await twitchLogin(app)
+
+        expect(res.statusCode).toBe(302)
+        expect(locationOf(res)).toBe('/account?reattach=twitch')
+        expect(sessionSetCookie(res)).toBeUndefined()
+        // Nothing signed in, so nothing to pay: the action would have no fan behind it.
+        expect(await count('fans')).toBe(0)
+        expect(await outboundEvents()).toHaveLength(0)
+      },
+      {},
+      registryOf(twitchProvider(['twitch.follow'])),
+    )
   })
 })
 
