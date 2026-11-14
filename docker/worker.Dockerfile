@@ -9,7 +9,7 @@
 # Build from the repository root:
 #   docker build -f docker/worker.Dockerfile -t ashuworld/worker .
 
-FROM node:22-slim AS build
+FROM node:25-slim AS build
 
 ENV CI=true
 RUN npm install --global pnpm@10.34.9
@@ -39,7 +39,7 @@ RUN pnpm exec esbuild apps/worker/src/index.ts \
       --banner:js="import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" \
       --outfile=/out/worker.js
 
-FROM node:22-slim AS runtime
+FROM node:25-slim AS runtime
 
 ENV NODE_ENV=production
 

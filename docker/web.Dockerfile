@@ -15,7 +15,7 @@
 #   docker build -f docker/web.Dockerfile -t ashuworld/web .
 #   docker build -f docker/web.Dockerfile --build-arg VITE_DEV_LOGIN=true -t ashuworld/web:dev .
 
-FROM node:22-slim AS build
+FROM node:25-slim AS build
 
 ENV CI=true
 RUN npm install --global pnpm@10.34.9

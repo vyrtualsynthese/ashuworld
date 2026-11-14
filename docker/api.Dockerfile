@@ -9,7 +9,7 @@
 # Build from the repository root:
 #   docker build -f docker/api.Dockerfile -t ashuworld/api .
 
-FROM node:22-slim AS build
+FROM node:25-slim AS build
 
 ENV CI=true
 # Pinned to the version in package.json's `packageManager`, installed rather than
@@ -57,7 +57,7 @@ RUN pnpm exec esbuild apps/api/src/migrate-cli.ts \
       --banner:js="import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" \
       --outfile=/out/migrate.js
 
-FROM node:22-slim AS runtime
+FROM node:25-slim AS runtime
 
 ENV NODE_ENV=production
 
