@@ -71,7 +71,7 @@ describe('schema', () => {
   it('is idempotent', async () => {
     await expect(migrate(db.pool)).resolves.toBeUndefined()
     const { rows } = await db.pool.query<{ n: string }>('select count(*)::text as n from _migrations')
-    expect(rows[0]?.n).toBe('3')
+    expect(rows[0]?.n).toBe('4')
   })
 
   it('records the applied files by name', async () => {
@@ -80,6 +80,7 @@ describe('schema', () => {
       '0001_init.sql',
       '0002_oauth_handshakes.sql',
       '0003_ladder_indexes.sql',
+      '0004_inbound_claim_index.sql',
     ])
   })
 
@@ -95,6 +96,19 @@ describe('schema', () => {
     // A full index would carry every forfeited entry forever: a detach forfeits instead
     // of deleting, and the balance never reads a forfeited row.
     expect(rows[0]?.indexdef).toMatch(/where \(forfeited_at is null\)/i)
+  })
+
+  // The worker's claim takes the oldest unprocessed row per provider, and the unrouted
+  // report groups the same predicate by provider. A full index would carry every processed
+  // event forever, which no query here reads.
+  it('indexes unprocessed inbound events by provider, partially', async () => {
+    const { rows } = await db.pool.query<{ indexdef: string }>(
+      `select indexdef from pg_indexes
+        where schemaname = current_schema() and indexname = 'inbound_events_unprocessed'`,
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.indexdef).toContain('(provider, id)')
+    expect(rows[0]?.indexdef).toMatch(/where \(processed_at is null\)/i)
   })
 
   it('refuses a handshake purpose that is neither login nor link', async () => {
@@ -216,7 +230,7 @@ describe('migration runner', () => {
       // re-check inside the lock makes it skip instead of replaying the file.
       await Promise.all([migrate(fresh.pool), migrate(fresh.pool)])
       const { rows } = await fresh.pool.query<{ n: string }>('select count(*)::text as n from _migrations')
-      expect(rows[0]?.n).toBe('3')
+      expect(rows[0]?.n).toBe('4')
       const { rows: fans } = await fresh.pool.query<{ n: string }>("select count(*)::text as n from pg_tables where schemaname = current_schema() and tablename = 'fans'")
       expect(fans[0]?.n).toBe('1')
     } finally {
@@ -238,6 +252,7 @@ describe('migration runner', () => {
         '0001_init.sql',
         '0002_oauth_handshakes.sql',
         '0003_ladder_indexes.sql',
+        '0004_inbound_claim_index.sql',
       ])
       await migrate(fresh.pool)
       const { rows } = await fresh.pool.query<{ name: string }>('select name from _migrations order by 1')
@@ -245,6 +260,7 @@ describe('migration runner', () => {
         '0001_init.sql',
         '0002_oauth_handshakes.sql',
         '0003_ladder_indexes.sql',
+        '0004_inbound_claim_index.sql',
       ])
       const { rows: tables } = await fresh.pool.query<{ tablename: string }>(
         `select tablename from pg_tables where schemaname = current_schema() order by 1`,

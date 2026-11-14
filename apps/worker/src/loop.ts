@@ -20,7 +20,6 @@ interface ClaimedEvent {
   id: string
   provider: string
   event_id: string
-  attempts: number
   payload: unknown
 }
 
@@ -32,14 +31,16 @@ interface ClaimedEvent {
  * written here, and `processed_at` stays null, which is what makes the event claimable
  * again on the next poll.
  *
- * `undefined` means the row no longer existed when the increment ran. Nothing in this
- * codebase deletes an inbound event, so the caller treats it as a lost count rather than
- * inventing a number.
+ * `and processed_at is null` guards the gap between the rollback and this transaction:
+ * another worker can claim and finish the row in that window, and without the guard this
+ * counter would rise on an event that is already done. `undefined` therefore means the
+ * increment matched no row — another worker processed it, or (nothing in this codebase
+ * deletes an inbound event) it vanished — and the caller does not invent an attempt.
  */
 async function recordFailedAttempt(pool: Pool, id: string): Promise<number | undefined> {
   return withTransaction(pool, async (tx) => {
     const { rows } = await tx.query<{ attempts: number }>(
-      'update inbound_events set attempts = attempts + 1 where id = $1 returning attempts',
+      'update inbound_events set attempts = attempts + 1 where id = $1 and processed_at is null returning attempts',
       [id],
     )
     return rows[0]?.attempts
@@ -52,10 +53,12 @@ async function recordFailedAttempt(pool: Pool, id: string): Promise<number | und
  *
  * The claim is the concurrency control: `for update skip locked` takes the row lock and
  * makes a second worker skip the row instead of waiting for it, and the
- * `processed_at is null` filter is what makes a claim mean "not yet paid". The processor
- * runs inside the same transaction, so its awards and the processed mark commit together:
- * a crash between them cannot pay the event twice, and a throw cannot leave half the work
- * behind.
+ * `processed_at is null` filter is what makes a claim mean "not yet paid". `attempts < 5`
+ * is the retry bound: a poison event that fails five times drops out of the claim instead
+ * of staying the oldest row forever, so the rest of its provider's queue drains. It stays
+ * in the table with `attempts = 5` for the operator to find. The processor runs inside the
+ * same transaction, so its awards and the processed mark commit together: a crash between
+ * them cannot pay the event twice, and a throw cannot leave half the work behind.
  *
  * This deliberately does not call `ingestEvent`. That function exists for first arrival;
  * it treats an existing `(provider, event_id)` as a duplicate and skips the handler,
@@ -63,8 +66,9 @@ async function recordFailedAttempt(pool: Pool, id: string): Promise<number | und
  *
  * On a throw the transaction rolls back, a second small transaction increments `attempts`,
  * the failure is logged with the event id and the attempt number, and the poll reports
- * `'empty'` so the loop waits and then takes the next row. There is no dead-letter table at
- * alpha: after five attempts the row is still queued and still logged on every attempt.
+ * `'empty'` so the loop waits and then takes the next row. There is no dead-letter table
+ * at alpha: a row that reaches five attempts stays unprocessed, is no longer claimed, and
+ * the operator finds it by its `attempts` count.
  *
  * Only providers with a registered processor are claimed. An event from any other provider
  * stays in the table untouched — it is not marked processed, so it is not lost, and its
@@ -77,9 +81,10 @@ export async function processOne(pool: Pool, processors: ProcessorMap): Promise<
   try {
     return await withTransaction(pool, async (tx) => {
       const { rows } = await tx.query<ClaimedEvent>(
-        `select id, provider, event_id, attempts, payload
+        `select id, provider, event_id, payload
            from inbound_events
           where processed_at is null
+            and attempts < 5
             and provider = any($1::text[])
           order by id
           for update skip locked
@@ -105,9 +110,17 @@ export async function processOne(pool: Pool, processors: ProcessorMap): Promise<
     if (claimed === undefined) throw error
 
     const attempt = await recordFailedAttempt(pool, claimed.id)
+    if (attempt === undefined) {
+      console.error(
+        `[worker] inbound event #${claimed.id} (${claimed.provider} "${claimed.event_id}") failed, ` +
+          'but another worker processed it before the attempt could be counted; there is nothing to retry',
+        error,
+      )
+      return 'empty'
+    }
     console.error(
       `[worker] inbound event #${claimed.id} (${claimed.provider} "${claimed.event_id}") failed on ` +
-        `attempt ${attempt ?? claimed.attempts + 1}; it stays unprocessed and will be retried`,
+        `attempt ${attempt}; it stays unprocessed and the claim retries it while attempts < 5`,
       error,
     )
     return 'empty'
