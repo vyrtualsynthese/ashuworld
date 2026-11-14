@@ -8,15 +8,7 @@ import {
   requireFan,
   type AuthDeps,
 } from '../auth/session.js'
-
-/** One provider account currently attached to the fan. */
-export interface FanIdentity {
-  id: string
-  provider: string
-  displayHandle: string
-  /** Always true here: the query selects attached identities, so the field is explicit. */
-  linked: boolean
-}
+import { listIdentities, type FanIdentity } from './identities.js'
 
 /** What `GET /api/me` answers: the account, its live standing and its identities. */
 export interface FanProfile {
@@ -35,12 +27,6 @@ interface FanRow {
   display_name: string
 }
 
-interface IdentityRow {
-  id: string
-  provider: string
-  display_handle: string
-}
-
 /**
  * Builds the profile from the ledger.
  *
@@ -49,12 +35,12 @@ interface IdentityRow {
  * schema — `sessions.fan_id` cascades from `fans` — but the read must not pretend a fan
  * exists if it does not.
  *
- * A detached identity has `fan_id` null, so it is not part of this fan's list at all.
- * That is the whole account model: the list is what the fan holds now, and there is no
- * detached history to show.
+ * The identity list comes from `listIdentities`, the same function behind
+ * `GET /api/me/identities`. Two copies of that select and its mapping would let the two
+ * endpoints disagree about what is attached, which is exactly the pair a client compares.
  *
- * All three reads share the caller's transaction, so the standing and the identity list
- * are one snapshot rather than three moments.
+ * All the reads share the caller's transaction, so the standing and the identity list are
+ * one snapshot rather than separate moments.
  */
 export async function readFanProfile(tx: Queryable, fanId: string): Promise<FanProfile> {
   const { rows } = await tx.query<FanRow>(
@@ -69,14 +55,7 @@ export async function readFanProfile(tx: Queryable, fanId: string): Promise<FanP
   }
 
   const standing = await getStanding(tx, fanId)
-
-  const identities = await tx.query<IdentityRow>(
-    `select id, provider, display_handle
-       from provider_identities
-      where fan_id = $1
-      order by provider, display_handle, id`,
-    [fanId],
-  )
+  const identities = await listIdentities(tx, fanId)
 
   return {
     id: fan.id,
@@ -85,12 +64,7 @@ export async function readFanProfile(tx: Queryable, fanId: string): Promise<FanP
     balance: standing.balance,
     peakXp: standing.peakXp,
     level: standing.level,
-    identities: identities.rows.map((identity) => ({
-      id: identity.id,
-      provider: identity.provider,
-      displayHandle: identity.display_handle,
-      linked: true,
-    })),
+    identities,
   }
 }
 

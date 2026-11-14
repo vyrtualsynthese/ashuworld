@@ -10,7 +10,15 @@ import {
 } from '@ashuworld/ledger'
 import { authenticatedFanId, requireFan, type AuthDeps } from '../auth/session.js'
 import { errorBody, notFoundBody } from '../errors.js'
-import type { FanIdentity } from './me.js'
+
+/** One provider account currently attached to the fan. */
+export interface FanIdentity {
+  id: string
+  provider: string
+  displayHandle: string
+  /** Always true here: the query selects attached identities, so the field is explicit. */
+  linked: boolean
+}
 
 /** Why a detach was refused. */
 type DetachRefusal = Extract<DetachResult, { ok: false }>['reason']
@@ -114,12 +122,25 @@ export async function detachOwnedIdentity(
 }
 
 /**
+ * Turns "this cannot happen" into a compile error.
+ *
+ * A new arm on `DetachOutcome` would otherwise fall out of the switch and leave the
+ * handler returning `undefined`, which Fastify sends as an empty 200 — a silent lie about
+ * a detach that did not happen. The `never` parameter makes adding a kind without handling
+ * it fail the build instead.
+ */
+function assertNever(outcome: never): never {
+  throw new Error(`detach: unhandled outcome ${JSON.stringify(outcome)}`)
+}
+
+/**
  * The identity routes: what the caller holds now, and giving one back.
  *
  * There is deliberately no attach route. An identity is attached only by a provider
  * callback that has exchanged a code, because only the provider can prove who controls
  * the account; a request naming an id proves nothing. A `POST .../reattach` therefore
- * falls to the not-found handler like any other unknown path.
+ * falls to the not-found handler like any other unknown path, and a test asserts the
+ * registered route table, not just that one URL.
  *
  * Both handlers run behind `requireFan`, so the fan id is the one the session proved and
  * never one a caller supplied.
@@ -156,6 +177,8 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: IdentityRoute
             peakXp: outcome.standing.peakXp,
             level: outcome.standing.level,
           }
+        default:
+          return assertNever(outcome)
       }
     },
   )
