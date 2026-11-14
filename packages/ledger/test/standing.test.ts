@@ -141,7 +141,7 @@ describe('standing', () => {
     provider: ProviderName = 'twitch',
   ): Promise<void> {
     const result = await withTransaction(db.pool, (tx) =>
-      awardOnce(tx, { identityId, provider, actionKey, amount, idempotencyKey }),
+      awardOnce(tx, { identityId, provider, actionKey, amount, idempotencyKey, cfg }),
     )
     expect(result.awarded).toBe(true)
   }
@@ -211,11 +211,13 @@ describe('standing', () => {
       await award(identityId, 'twitch.follow', 50, 'earn-1')
       await penalize(fanId, -20, 'penalty-1')
       expect(await balanceOf(fanId)).toBe(30)
-      expect(await recompute(fanId)).toEqual({ balance: 30, peakXp: 30, level: 0 })
+      // The award already raised the peak to the 50 it earned; the punishment only lowers
+      // the live balance, so the record stays at 50.
+      expect(await recompute(fanId)).toEqual({ balance: 30, peakXp: 50, level: 0 })
 
       await detach(identityId)
       expect(await balanceOf(fanId)).toBe(-20)
-      expect(await recompute(fanId)).toEqual({ balance: -20, peakXp: 30, level: 0 })
+      expect(await recompute(fanId)).toEqual({ balance: -20, peakXp: 50, level: 0 })
     })
 
     it('ignores an identity that is not attached even when its earn is not forfeited', async () => {
@@ -359,8 +361,11 @@ describe('standing', () => {
       // that level; without it the recompute, knowing only its own table, would demote.
       const fanId = await seedFan()
       const identityId = await seedIdentity()
-      await attach(identityId, fanId)
+      // Earned before the link so the award itself cannot have raised the stored level:
+      // this test needs the next recompute to be the one that moves it, so the pause in
+      // the level update is actually reached.
       await award(identityId, 'youtube.subscribe', 300, 'earn-1')
+      await attach(identityId, fanId)
 
       const paused = deferred()
       const release = deferred()
@@ -432,6 +437,7 @@ describe('standing', () => {
           actionKey: 'youtube.subscribe',
           amount: 200,
           idempotencyKey: 'earn-2',
+          cfg,
         })
         await recomputeStanding(tx, fanId, cfg)
       })
@@ -465,7 +471,10 @@ describe('standing', () => {
       await award(identityId, 'twitch.follow', 50, 'earn-1')
       await award(identityId, 'youtube.subscribe', 100, 'earn-2')
 
-      // Nothing has recomputed yet: the balance is 150 but the record is still at zero.
+      // A read must not repair a stale record. The awards recompute as they land, so put
+      // the record behind the ledger by hand: the test is about what `getStanding` does
+      // with what it finds, not about how the record got that way.
+      await db.pool.query('update fans set peak_xp = 0, level = 0 where id = $1', [fanId])
       expect(await withTransaction(db.pool, (tx) => getStanding(tx, fanId))).toEqual({
         balance: 150,
         peakXp: 0,
@@ -477,7 +486,8 @@ describe('standing', () => {
     it('reads the fan row and the balance in one statement', async () => {
       // With two statements, a pool-backed call takes two snapshots and a page can show a
       // balance from one moment beside a peak from another. The count pins the single
-      // statement; the values pin that the join still finds the fan's rows.
+      // statement; the values pin that the join still finds the fan's rows. The award has
+      // already raised the stored peak to 50, so both sides of the join are non-zero.
       const fanId = await seedFan()
       const identityId = await seedIdentity()
       await attach(identityId, fanId)
@@ -494,7 +504,7 @@ describe('standing', () => {
           return { rows: result.rows as R[] }
         },
       }
-      expect(await getStanding(counting, fanId)).toEqual({ balance: 50, peakXp: 0, level: 0 })
+      expect(await getStanding(counting, fanId)).toEqual({ balance: 50, peakXp: 50, level: 0 })
       expect(statements).toBe(1)
     })
 

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { GameConfig } from '@ashuworld/gameconfig'
 import type { ProviderName } from '@ashuworld/providers'
 import {
+  MAX_PENALTY_XP,
   PenaltyError,
   addPenalty,
   awardOnce,
@@ -107,7 +108,7 @@ describe('penalties', () => {
     provider: ProviderName = 'twitch',
   ): Promise<void> {
     const result = await withTransaction(db.pool, (tx) =>
-      awardOnce(tx, { identityId, provider, actionKey, amount, idempotencyKey }),
+      awardOnce(tx, { identityId, provider, actionKey, amount, idempotencyKey, cfg }),
     )
     expect(result.awarded).toBe(true)
   }
@@ -157,6 +158,16 @@ describe('penalties', () => {
       'select kind, fan_id, identity_id, actor_fan_id, detail from audit_log order by id',
     )
     return rows
+  }
+
+  /** The real transaction, with its audit insert replaced by a failure. Used by the rollback test. */
+  function withoutAudit(tx: Queryable): Queryable {
+    return {
+      async query<R extends object>(text: string, values?: unknown[]): Promise<{ rows: R[] }> {
+        if (text.includes('insert into audit_log')) throw new Error('audit log unavailable')
+        return tx.query<R>(text, values)
+      },
+    }
   }
 
   /**
@@ -222,13 +233,34 @@ describe('penalties', () => {
     expect(penalty.forfeited_at).toBeNull()
   })
 
+  it('remembers the high-water mark the fan reached before the punishment', async () => {
+    // The worked example from the review: 150 xp (level 1), then 350 more (balance 500,
+    // level 2), then a -250 punishment. If the peak were only recomputed at the punishment,
+    // it would be max(150, 250) = 250 and the fan would sit at level 1 even though they had
+    // earned level 2. The award has to recompute too.
+    const fanId = await seedFan()
+    const identityId = await seedIdentity()
+    await award(identityId, 'twitch.follow', 50, 'follow-1')
+    await award(identityId, 'youtube.subscribe', 100, 'subscribe-1')
+    await link(fanId, identityId)
+    expect(await standingOf(fanId)).toEqual({ balance: 150, peakXp: 150, level: 1 })
+
+    // A different action key: `twitch.follow` is already spent for this identity.
+    await award(identityId, 'twitch.cheer', 350, 'cheer-1')
+    expect(await standingOf(fanId)).toEqual({ balance: 500, peakXp: 500, level: 2 })
+
+    await penalize(fanId, fanId, -250, 'spam in chat')
+
+    expect(await standingOf(fanId)).toEqual({ balance: 250, peakXp: 500, level: 2 })
+  })
+
   it('rejects a positive amount', async () => {
     const fanId = await seedFan()
 
     const failure = await refusal(penalize(fanId, fanId, 50, 'spam in chat'))
 
     expect(failure.code).toBe('invalid_amount')
-    expect(failure.message).toMatch(/negative/i)
+    expect(failure.message).toMatch(/lower the balance/i)
     expect(await entryCount()).toBe(0)
   })
 
@@ -251,6 +283,39 @@ describe('penalties', () => {
     expect(failure.code).toBe('invalid_amount')
     expect(failure.message).toMatch(/whole number/i)
     expect(await entryCount()).toBe(0)
+  })
+
+  it('rejects Number.MIN_SAFE_INTEGER', async () => {
+    // `Number.isInteger(MIN_SAFE_INTEGER)` is true and it is negative, so a sign-and-integer
+    // check alone lets it through and Postgres answers with `22003 value out of range for
+    // type integer` — the opaque message this task exists to prevent.
+    const fanId = await seedFan()
+
+    const failure = await refusal(penalize(fanId, fanId, Number.MIN_SAFE_INTEGER, 'spam in chat'))
+
+    expect(failure.code).toBe('invalid_amount')
+    expect(failure.message).toContain(String(MAX_PENALTY_XP))
+    expect(await entryCount()).toBe(0)
+  })
+
+  it('rejects an amount just beyond the ceiling', async () => {
+    const fanId = await seedFan()
+
+    const failure = await refusal(penalize(fanId, fanId, -(MAX_PENALTY_XP + 1), 'spam in chat'))
+
+    expect(failure.code).toBe('invalid_amount')
+    expect(failure.message).toContain(String(MAX_PENALTY_XP))
+    expect(await entryCount()).toBe(0)
+  })
+
+  it('accepts a punishment exactly at the ceiling', async () => {
+    // The bound is inclusive: it refuses the impossible, it does not quietly shrink the
+    // rule the error message states.
+    const fanId = await seedFan()
+
+    await penalize(fanId, fanId, -MAX_PENALTY_XP, 'spam in chat')
+
+    expect(await standingOf(fanId)).toEqual({ balance: -MAX_PENALTY_XP, peakXp: 0, level: 0 })
   })
 
   it('rejects an empty reason', async () => {
@@ -345,6 +410,13 @@ describe('penalties', () => {
     expect(rows).toHaveLength(2)
     expect(new Set(rows.map((row) => row.idempotency_key)).size).toBe(2)
     expect(await standingOf(fanId)).toEqual({ balance: -60, peakXp: 0, level: 0 })
+
+    // The audit trail names the ledger entry (F5), so two otherwise identical punishments
+    // are still distinguishable there.
+    const audits = await auditRows()
+    expect(audits.map((row) => String(row.detail['entryId'])).sort()).toEqual(
+      [firstPenalty.entryId, secondPenalty.entryId].sort(),
+    )
   })
 
   it('writes a fan-level row with the actor and the trimmed reason', async () => {
@@ -382,7 +454,7 @@ describe('penalties', () => {
     const fanId = await seedFan('ashu')
     const actorId = await seedFan('moderator')
 
-    await penalize(fanId, actorId, -25, 'spam in chat')
+    const { entryId } = await penalize(fanId, actorId, -25, 'spam in chat')
 
     // No link happened in this test, so the penalty is the only audit row.
     const rows = await auditRows()
@@ -392,8 +464,32 @@ describe('penalties', () => {
       fan_id: fanId,
       identity_id: null,
       actor_fan_id: actorId,
-      detail: { amount: -25, reason: 'spam in chat' },
+      // F5: the audit row carries the ledger entry it describes.
+      detail: { entryId, amount: -25, reason: 'spam in chat' },
     })
+  })
+
+  it('writes the ledger row and the audit row in one transaction', async () => {
+    // A failure after the ledger insert must take the ledger row with it. An audit trail
+    // that disagrees with the accounting is worse than none, and a punishment that
+    // committed without its audit row would be invisible to the operator reviewing it.
+    const fanId = await seedFan()
+
+    await expect(
+      withTransaction(db.pool, (tx) =>
+        addPenalty(withoutAudit(tx), {
+          fanId,
+          actorFanId: fanId,
+          amount: -25,
+          reason: 'spam in chat',
+          cfg,
+        }),
+      ),
+    ).rejects.toThrow(/audit log unavailable/)
+
+    expect(await entryCount()).toBe(0)
+    expect(await auditRows()).toHaveLength(0)
+    expect(await standingOf(fanId)).toEqual({ balance: 0, peakXp: 0, level: 0 })
   })
 
   it('fails loud when the insert reports no row', async () => {

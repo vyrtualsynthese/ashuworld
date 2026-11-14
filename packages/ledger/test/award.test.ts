@@ -5,6 +5,7 @@ import {
   AwardConflictError,
   awardOnce,
   ensureIdentity,
+  getStanding,
   ingestEvent,
   withTransaction,
   type Queryable,
@@ -20,7 +21,11 @@ const cfg: GameConfig = {
     'twitch.follow': { amount: 50, provider: 'twitch' },
     'youtube.subscribe': { amount: 50, provider: 'youtube' },
   },
-  levels: [{ level: 0, minXp: 0 }],
+  levels: [
+    { level: 0, minXp: 0 },
+    { level: 1, minXp: 100 },
+    { level: 2, minXp: 300 },
+  ],
 }
 
 /** A connection that answers every statement with no rows, for the fail-closed paths. */
@@ -71,7 +76,30 @@ describe('awardOnce', () => {
       actionKey,
       amount: actionAmount(cfg, actionKey),
       idempotencyKey,
+      cfg,
     }
+  }
+
+  async function fan(handle = 'ashu'): Promise<string> {
+    const { rows } = await db.pool.query<{ id: string }>(
+      `insert into fans (handle, display_name) values ($1, $1) returning id`,
+      [handle],
+    )
+    const row = rows[0]
+    if (row === undefined) throw new Error('expected the fan insert to return a row')
+    return row.id
+  }
+
+  /** Attaching is Task 6's job; here it sets the two columns the balance query reads. */
+  async function attach(identityId: string, fanId: string): Promise<void> {
+    await db.pool.query(
+      'update provider_identities set fan_id = $1, linked_at = now() where id = $2',
+      [fanId, identityId],
+    )
+  }
+
+  function standingOf(fanId: string) {
+    return withTransaction(db.pool, (tx) => getStanding(tx, fanId))
   }
 
   async function entries(): Promise<EntryRow[]> {
@@ -116,6 +144,23 @@ describe('awardOnce', () => {
         idempotency_key: 'evt-1',
       }),
     ])
+  })
+
+  it("raises a linked fan's level the moment they earn", async () => {
+    // No link, detach or punishment after this point: the award itself has to move the
+    // badge, or a fan can earn their way to level 2 and still be shown level 1.
+    const identityId = await identity()
+    const fanId = await fan()
+    await attach(identityId, fanId)
+    expect(await standingOf(fanId)).toEqual({ balance: 0, peakXp: 0, level: 0 })
+
+    await withTransaction(db.pool, (tx) => awardOnce(tx, earn(identityId, 'twitch.follow', 'evt-1')))
+    expect(await standingOf(fanId)).toEqual({ balance: 50, peakXp: 50, level: 0 })
+
+    await withTransaction(db.pool, (tx) =>
+      awardOnce(tx, earn(identityId, 'youtube.subscribe', 'evt-2')),
+    )
+    expect(await standingOf(fanId)).toEqual({ balance: 100, peakXp: 100, level: 1 })
   })
 
   it('lets two different identities earn the same action', async () => {
@@ -322,6 +367,7 @@ describe('ingestEvent', () => {
       actionKey: 'twitch.follow',
       amount: actionAmount(cfg, 'twitch.follow'),
       idempotencyKey,
+      cfg,
     }
   }
 
