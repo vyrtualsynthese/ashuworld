@@ -10,11 +10,58 @@ export interface AwardInput {
   idempotencyKey: string
 }
 
+/**
+ * Why an award was or was not paid.
+ *
+ * `action_spent` and `key_seen` are both refusals, and telling them apart matters: the
+ * first is the game working as designed, the second usually means a delivery id was
+ * reused by a different identity — a caller bug that would otherwise look like an
+ * ordinary replay and silently stop paying a subset of fans.
+ */
+export type AwardReason = 'awarded' | 'action_spent' | 'key_seen'
+
 export interface AwardResult {
   /** True only for the call that actually inserted the row. */
   awarded: boolean
-  /** The entry that paid, new or already there; null only if a conflicting row vanished. */
+  /**
+   * The entry the answer is about: the new row, the row that spent the one-time action,
+   * or the row that owns the reused idempotency key. The interface allows null, but no
+   * current branch returns it — an unreadable conflict throws instead.
+   */
   entryId: string | null
+  reason: AwardReason
+}
+
+export interface AwardConflictInput {
+  provider: ProviderName
+  actionKey: string
+  idempotencyKey: string
+}
+
+/**
+ * The insert was refused by a unique constraint whose row cannot be found.
+ *
+ * `awardOnce` inserts with a bare `on conflict do nothing`, so it catches every unique
+ * constraint on `xp_entries`, including one a later migration might add. When neither
+ * read-back explains the refusal, the safe answer is not "already paid" — that would
+ * stop paying fans with no error and no log — but an exception naming what was refused.
+ */
+export class AwardConflictError extends Error {
+  readonly provider: ProviderName
+  readonly actionKey: string
+  readonly idempotencyKey: string
+
+  constructor(conflict: AwardConflictInput) {
+    super(
+      `award conflict for ${conflict.provider} "${conflict.actionKey}" (idempotency key "${conflict.idempotencyKey}"): ` +
+        'the insert was refused but no conflicting entry is visible, so a unique constraint ' +
+        'on xp_entries matched that this code does not know about',
+    )
+    this.name = 'AwardConflictError'
+    this.provider = conflict.provider
+    this.actionKey = conflict.actionKey
+    this.idempotencyKey = conflict.idempotencyKey
+  }
 }
 
 export type IngestOutcome = 'processed' | 'duplicate'
@@ -27,7 +74,7 @@ export interface IngestEventInput {
 }
 
 /**
- * Pays a one-time action at most once per identity.
+ * Pays a one-time action at most once per identity, and says why.
  *
  * The insert is the check: `on conflict do nothing` covers both unique keys on
  * `xp_entries` — the partial `(identity_id, action_key) where kind = 'earn'` index that
@@ -35,9 +82,22 @@ export interface IngestEventInput {
  * delivery to the entry it already produced. A concurrent caller blocks on the index and
  * then returns no row, so exactly one caller can ever see `awarded: true`.
  *
- * When nothing was inserted, the winning row is read back in the same transaction. There
- * is no read-then-write window to lose: the read only happens after the database has
- * already refused the write.
+ * When nothing was inserted, the winning row is read back in the same transaction, and
+ * the read that succeeds names the refusal:
+ *
+ * - `action_spent`: this identity already earned this action (the row is its own);
+ * - `key_seen`: the idempotency key belongs to some entry, possibly another identity's.
+ *   The returned `entryId` is then that entry, not this identity's — the caller must
+ *   read `reason` before blaming anyone;
+ * - neither read finds a row: the database refused for a reason this code does not model,
+ *   so it throws `AwardConflictError` instead of reporting a refusal.
+ *
+ * The one-time action is checked before the key. When both would conflict, the action is
+ * the more specific answer: this identity really was paid already, whatever else the key
+ * collided with.
+ *
+ * There is no read-then-write window to lose: the reads only happen after the database
+ * has already refused the write.
  */
 export async function awardOnce(tx: Queryable, input: AwardInput): Promise<AwardResult> {
   const { rows } = await tx.query<{ id: string }>(
@@ -48,7 +108,7 @@ export async function awardOnce(tx: Queryable, input: AwardInput): Promise<Award
     [input.identityId, input.provider, input.actionKey, input.amount, input.idempotencyKey],
   )
   const inserted = rows[0]
-  if (inserted !== undefined) return { awarded: true, entryId: inserted.id }
+  if (inserted !== undefined) return { awarded: true, entryId: inserted.id, reason: 'awarded' }
 
   // The one-time key was spent: name the row that spent it.
   const spent = await tx.query<{ id: string }>(
@@ -56,15 +116,18 @@ export async function awardOnce(tx: Queryable, input: AwardInput): Promise<Award
     [input.identityId, input.actionKey],
   )
   const oneTime = spent.rows[0]
-  if (oneTime !== undefined) return { awarded: false, entryId: oneTime.id }
+  if (oneTime !== undefined) return { awarded: false, entryId: oneTime.id, reason: 'action_spent' }
 
-  // Otherwise the idempotency key was the conflict: a replayed delivery that asked for a
-  // different action. Name the entry that owns the key.
+  // Otherwise the idempotency key was the conflict: a replayed delivery, or another
+  // identity handed the same key. Name the entry that owns the key.
   const keyed = await tx.query<{ id: string }>(
     `select id from xp_entries where idempotency_key = $1`,
     [input.idempotencyKey],
   )
-  return { awarded: false, entryId: keyed.rows[0]?.id ?? null }
+  const keyOwner = keyed.rows[0]
+  if (keyOwner !== undefined) return { awarded: false, entryId: keyOwner.id, reason: 'key_seen' }
+
+  throw new AwardConflictError(input)
 }
 
 /**
@@ -79,7 +142,14 @@ export async function awardOnce(tx: Queryable, input: AwardInput): Promise<Award
  * is rolled back to the savepoint — its award and the `processed_at` mark both disappear —
  * while the event row itself stays, unprocessed, with `attempts` incremented. That is
  * what makes a retry possible and measurable; the original exception is rethrown after
- * the increment commits, so the worker sees exactly what the handler threw.
+ * the increment commits, so the worker sees exactly what the handler threw. A successful
+ * handler releases the savepoint so the transaction does not carry an open subtransaction
+ * until commit.
+ *
+ * The handler contract: it must write only through the `tx` it is given, and must not
+ * issue its own `commit`, `rollback` or `savepoint` statements. The savepoint is what
+ * contains a failure; a handler that ends or rewrites the transaction it was handed can
+ * commit a half-applied award, and nothing in this function can undo that.
  */
 export async function ingestEvent(pool: Pool, input: IngestEventInput): Promise<IngestOutcome> {
   const outcome = await withTransaction(pool, async (tx) => {
@@ -103,6 +173,7 @@ export async function ingestEvent(pool: Pool, input: IngestEventInput): Promise<
       await tx.query('update inbound_events set attempts = attempts + 1 where id = $1', [event.id])
       return { kind: 'failed' as const, error }
     }
+    await tx.query('release savepoint award_handler')
 
     await tx.query('update inbound_events set processed_at = now() where id = $1', [event.id])
     return { kind: 'processed' as const }
