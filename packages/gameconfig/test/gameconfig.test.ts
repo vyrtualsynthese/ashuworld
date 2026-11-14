@@ -25,7 +25,7 @@ function rejection(fn: () => unknown): string {
     fn()
   } catch (error) {
     if (error instanceof ConfigError) return error.message
-    throw new Error(`expected ConfigError, got ${String(error)}`)
+    throw new Error(`expected ConfigError, got ${String(error)}`, { cause: error })
   }
   throw new Error('expected the call to throw ConfigError, but it returned')
 }
