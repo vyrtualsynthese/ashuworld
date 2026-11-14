@@ -1,14 +1,12 @@
 import type { Pool } from 'pg'
 import {
   ALPHA_RESET_CONFIRM_ENV,
-  enqueueEvent,
-  monthKey,
   recomputeLevels,
   resetAlpha,
 } from '@ashuworld/ledger'
-import { discoveryEventId, type DiscoveredPerson } from '@ashuworld/providers'
 import type { Connector } from './connectors/types.js'
-import { runDiscovery } from './discovery.js'
+import { DEFAULT_SYNC_INTERVAL_SECONDS } from './config.js'
+import { createDiscoveryEnqueue, runDiscovery } from './discovery.js'
 import { loadWorkerGameConfig } from './gameConfig.js'
 import { runLoop } from './loop.js'
 import type { ProcessorMap } from './processors.js'
@@ -16,8 +14,11 @@ import type { ProcessorMap } from './processors.js'
 /** The game config version the reset records, and every other process in the chart reads. */
 export const CONFIG_VERSION_ENV = 'GAME_CONFIG_VERSION'
 
-/** How long the worker waits between discovery rounds: fifteen minutes, the sync cadence. */
-export const DEFAULT_SYNC_INTERVAL_MS = 900_000
+/**
+ * How long the worker waits between discovery rounds: fifteen minutes, the sync cadence.
+ * Derived from the config default so the two cannot drift apart.
+ */
+export const DEFAULT_SYNC_INTERVAL_MS = DEFAULT_SYNC_INTERVAL_SECONDS * 1000
 
 export interface CliDeps {
   /** The database the command talks to. The shell owns creating and closing it. */
@@ -100,14 +101,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
       // Discovery only writes queue rows; the drain loop stays the only thing that pays
       // them. Both loops share one signal, so shutdown stops finding people and stops
       // paying them at the same moment.
-      const enqueue = async (person: DiscoveredPerson): Promise<void> => {
-        const month = monthKey(new Date())
-        await enqueueEvent(deps.pool, {
-          provider: person.provider,
-          eventId: discoveryEventId('sync', person, month),
-          payload: { kind: 'discovery', ...person },
-        })
-      }
+      const enqueue = createDiscoveryEnqueue(deps.pool)
 
       await Promise.all([
         runLoop(deps.pool, deps.processors, signalOptions),
