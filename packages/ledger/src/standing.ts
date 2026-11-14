@@ -48,6 +48,44 @@ export function liveBalanceQuery(fanRef: string): string {
 }
 
 /**
+ * The live balance of every fan, in one grouped pass, keyed by `fan_id`.
+ *
+ * This is the ladder's form of the rule in `liveBalanceQuery`: the same two branches (a
+ * fan's penalties, plus the live earns of the identities attached to it) summed per fan,
+ * but aggregated once for the whole table instead of once per fan. Two owners of one rule
+ * is what this module exists to prevent, so the branches below must change whenever
+ * `liveBalanceQuery` changes; `test/ladder.test.ts` asserts the ladder's number equals
+ * `computeBalance` for every fan it lists.
+ *
+ * Why a second form: `liveBalanceQuery` is written per fan, and the ladder joined it
+ * laterally, so the planner ran it once per row of `fans`. The `or` across the two
+ * ownership branches cannot be served by one index, and the measured plan rescanned the
+ * whole ledger per fan (2,000 fans over 102,000 entries: 26.5 s). Grouped, the same rule
+ * is one pass and the penalty branch uses `xp_entries_fan_live` (30 ms).
+ *
+ * A fan with no entries at all is simply absent; callers coalesce to 0.
+ */
+export function liveBalancesQuery(): string {
+  return `select fan_id, sum(amount)::int as balance
+            from (
+              select i.fan_id, e.amount
+                from xp_entries e
+                join provider_identities i on i.id = e.identity_id
+               where e.kind = 'earn'
+                 and e.forfeited_at is null
+                 and i.fan_id is not null
+                 and i.linked_at is not null
+              union all
+              select e.fan_id, e.amount
+                from xp_entries e
+               where e.kind = 'penalty'
+                 and e.forfeited_at is null
+                 and e.fan_id is not null
+            ) parts
+           group by fan_id`
+}
+
+/**
  * The fan's spendable xp: penalties charged to the fan personally, plus the live earns
  * of the identities currently attached to it.
  *

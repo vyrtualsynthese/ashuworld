@@ -1,6 +1,6 @@
 import type { ProviderName } from '@ashuworld/providers'
 import type { Queryable } from './db.js'
-import { getStanding, liveBalanceQuery } from './standing.js'
+import { getStanding, liveBalancesQuery } from './standing.js'
 
 /** One account on the public ladder, ranked by what it can spend today. */
 export interface LadderRow {
@@ -69,10 +69,16 @@ interface FreeRow {
  * The public ladder in two lists: fan accounts ranked by current balance, and identities
  * that have never been linked.
  *
- * `balance` comes from the same lateral aggregate `computeBalance` uses, never from
- * `fans.peak_xp`. The peak is a record that only moves forward; ranking by it would put a
- * punished or detached fan above someone who actually has more xp to spend, and the
- * ladder would disagree with the profile page it links to.
+ * `balance` comes from the same rule `computeBalance` uses, in its grouped form
+ * (`liveBalancesQuery`), never from `fans.peak_xp`. The peak is a record that only moves
+ * forward; ranking by it would put a punished or detached fan above someone who actually
+ * has more xp to spend, and the ladder would disagree with the profile page it links to.
+ *
+ * Grouped rather than lateral on purpose. A `cross join lateral` runs the per-fan balance
+ * once per row of `fans`, and its `or` over the two ownership branches cannot use an
+ * index, so the planner rescans the whole ledger for every fan (measured: 26.5 s for
+ * 2,000 fans over 102,000 entries). One aggregate over the table is 30 ms and lets the
+ * penalty branch use `xp_entries_fan_live`.
  *
  * A fan who lost everything still belongs on the ladder: their balance is 0 and they sort
  * to the bottom, but they do not vanish because they had a bad month. Ties break by
@@ -88,10 +94,10 @@ interface FreeRow {
  */
 export async function listLadder(tx: Queryable): Promise<Ladder> {
   const linked = await tx.query<LinkedRow>(
-    `select f.id as fan_id, f.handle, f.level, live.balance
+    `select f.id as fan_id, f.handle, f.level, coalesce(live.balance, 0) as balance
        from fans f
-       cross join lateral (${liveBalanceQuery('f.id')}) live
-      order by live.balance desc, f.handle asc`,
+       left join (${liveBalancesQuery()}) live on live.fan_id = f.id
+      order by coalesce(live.balance, 0) desc, f.handle asc`,
   )
 
   const free = await tx.query<FreeRow>(

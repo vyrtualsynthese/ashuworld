@@ -37,6 +37,20 @@ async function readSnapshot<T>(pool: Pool, work: (tx: Queryable) => Promise<T>):
 }
 
 /**
+ * A public page is the same for everyone and moves at the pace of an earn, not a click,
+ * so a short shared-cache window is safe and keeps a shared link off the origin. The
+ * session cookie is ignored on these routes, so there is nothing per-caller to leak.
+ */
+const PUBLIC_CACHE = 'public, max-age=15'
+
+/**
+ * A 404 is heuristically cacheable, which would be a bug here: a handle with no account
+ * today can have one after the next sign-up, and a CDN holding "not found" would keep
+ * answering that long after the route started answering 200.
+ */
+const NOT_FOUND_CACHE = 'no-store'
+
+/**
  * The public surface: the ladder and a fan's profile.
  *
  * Neither route has a preHandler and neither reads the session cookie. A signed-in fan is
@@ -48,15 +62,24 @@ async function readSnapshot<T>(pool: Pool, work: (tx: Queryable) => Promise<T>):
  * route, so the response cannot be used to discover who has an account.
  */
 export function registerPublicRoutes(app: FastifyInstance, deps: PublicRouteDeps): void {
-  app.get('/api/public/ladder', async () => readSnapshot(deps.pool, (tx) => listLadder(tx)))
+  app.get('/api/public/ladder', async (_request, reply) => {
+    reply.header('Cache-Control', PUBLIC_CACHE)
+    return readSnapshot(deps.pool, (tx) => listLadder(tx))
+  })
 
   app.get<{ Params: { handle: string } }>(
     '/api/public/fans/:handle',
     async (request, reply) => {
+      reply.header('Cache-Control', PUBLIC_CACHE)
       const profile = await readSnapshot(deps.pool, (tx) =>
         getFanByHandle(tx, request.params.handle),
       )
-      if (profile === null) return reply.code(404).send(notFoundBody())
+      if (profile === null) {
+        // Set after the successful branch's public header, so the 404 replaces it rather
+        // than carrying a cacheable directive by accident.
+        reply.header('Cache-Control', NOT_FOUND_CACHE)
+        return reply.code(404).send(notFoundBody())
+      }
       return profile
     },
   )
