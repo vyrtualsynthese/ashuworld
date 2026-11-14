@@ -141,7 +141,9 @@ packages:
   - packages/*
 ```
 
-Root `package.json` scripts: `"typecheck": "tsc -b"`, `"lint": "eslint ."`, `"test": "vitest run"`, `"test:coverage": "vitest run --coverage"`, `"build": "pnpm -r build"`. Dev deps: `typescript`, `vitest`, `@vitest/coverage-v8`, `eslint`, `typescript-eslint`, `@types/node`. Each package gets `"test": "vitest run"` and `"typecheck": "tsc --noEmit"`.
+Root `package.json` scripts: `"typecheck": "pnpm -r typecheck"`, `"lint": "eslint ."`, `"test": "vitest run"`, `"test:coverage": "vitest run --coverage"`, `"build": "pnpm -r build"`. Dev deps: `typescript`, `vitest`, `@vitest/coverage-v8`, `eslint`, `typescript-eslint`, `@types/node`. Each workspace package gets `"test": "vitest run"`, `"typecheck": "tsc --noEmit -p tsconfig.json"` and `"build": "tsc -b"`.
+
+Typechecking is per package, not one root program: the web app needs `jsx` and `DOM`, the worker needs neither, and a single program cannot serve both without every package inheriting the union of their settings. The root `tsconfig.json` carries `"files": []` and the `paths` map; it exists for editors and for the base settings, and it includes no sources.
 
 Root `vitest.config.ts` sets `test.coverage.provider = 'v8'`, reporters `['text', 'lcov']`, and `thresholds: { lines: 80, branches: 80, functions: 80, statements: 80 }`. Exclude only `**/dist/**`, `**/test/**`, `**/*.d.ts` and `**/*.config.ts`: generated glue is excluded, behaviour is not.
 
@@ -973,7 +975,7 @@ git add packages/ledger apps/api && git commit -m "✨ feat: public profile and 
 
 **Files:**
 - Create: `apps/web/package.json`, `apps/web/tsconfig.json`, `apps/web/index.html`, `vite.config.ts`, `src/main.tsx`, `src/App.tsx`, `src/api.ts`, `src/pages/Home.tsx`, `src/pages/Ladder.tsx`, `src/pages/Profile.tsx`, `src/pages/Account.tsx`
-- Note: the base tsconfig has `lib: ["ES2023"]` and no `jsx`; this task's own `tsconfig.json` must add `"lib": ["ES2023", "DOM", "DOM.Iterable"]` and `"jsx": "react-jsx"`, and use `"moduleResolution": "Bundler"`. Getting that wrong looks like a bug in the skeleton and is not one.
+- Note: the base tsconfig has `lib: ["ES2023"]` and no `jsx`. This app's own `tsconfig.json` must add `"lib": ["ES2023", "DOM", "DOM.Iterable"]`, `"jsx": "react-jsx"` and `"moduleResolution": "Bundler"`, and include its `src` and `test` (`.tsx` included). Because typechecking is per package, this file is the one that governs `apps/web`; the root program never sees it.
 - Test: `apps/web/test/pages.test.tsx`
 
 **Interfaces:**
