@@ -144,6 +144,8 @@ Root `package.json` scripts: `"typecheck": "tsc -b"`, `"lint": "eslint ."`, `"te
 
 Root `vitest.config.ts` sets `test.coverage.provider = 'v8'`, reporters `['text', 'lcov']`, and `thresholds: { lines: 80, branches: 80, functions: 80, statements: 80 }`. Exclude only `**/dist/**`, `**/test/**`, `**/*.d.ts` and `**/*.config.ts`: generated glue is excluded, behaviour is not.
 
+Workspace dependencies: `@ashuworld/ledger` → `@ashuworld/providers`, `@ashuworld/gameconfig`, `pg`; `@ashuworld/api` → `@ashuworld/ledger`, `@ashuworld/gameconfig`, `@ashuworld/providers`, `fastify`, `@fastify/cookie`, `@fastify/static`; `@ashuworld/worker` → `@ashuworld/ledger`, `@ashuworld/providers`; `@ashuworld/web` → `react`, `react-dom`, `react-router`.
+
 `packages/providers/src/index.ts`:
 
 ```ts
@@ -781,7 +783,7 @@ git add apps/api && git commit -m "✨ feat: server sessions and current fan end
 **Interfaces:**
 - Produces: `interface OAuthProvider { name: ProviderName; authorizeUrl(input: { state: string; redirectUri: string }): string; exchange(input: { code: string; redirectUri: string }): Promise<IdentityProfile> }`.
 - Produces: `startHandshake(tx, input: { provider: ProviderName; purpose: 'login' | 'link'; fanId: string | null }): Promise<{ state: string; authorizeUrl: string }>` and `consumeHandshake(tx, input: { state: string }): Promise<{ provider: ProviderName; purpose: 'login' | 'link'; fanId: string | null }>` — single use, 10-minute expiry, deleted on consume.
-- Produces: `GET /auth/:provider/start?purpose=login|link` → 302 to the provider; `GET /auth/:provider/callback?code&state` → on `login`, creates or resolves the fan and sets the session cookie, then 302 to `/account`; on `link`, attaches within the same transaction, then 302 to `/account`.
+- Produces: `GET /auth/:provider/start?purpose=login|link` → 302 to the provider; `GET /auth/:provider/callback?code&state` → on `login`, creates or resolves the fan and sets the session cookie, then 302 to `/account`; on `link`, attaches within the same transaction, then 302 to `/account`. **Re-attach is always this `link` path**: it is the only way to prove control of a detached account, so a bare identity id must never attach anything.
 - Produces: dev provider that `ALLOW_DEV_LOGIN=true` registers as `dev`; its `authorizeUrl` points straight back to the callback with `code=<handle>`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -837,7 +839,9 @@ create table oauth_handshakes (
 
 `consumeHandshake` deletes the row with `returning`, which makes reuse impossible even under a race.
 
-Login resolution, in order: identity attached to a fan → that fan; identity exists but detached (`first_linked_at` set) → 302 to `/account?reattach=<id>` and stop; identity unknown → create fan (handle from `displayHandle`, lowercased, deduped with `-2`, `-3`) and attach the identity, stamping `first_linked_at`.
+Login resolution, in order: identity attached to a fan → that fan; identity exists but detached (`first_linked_at` set) → 302 to `/account?reattach=<provider>` and stop; identity unknown → create fan (handle from `displayHandle`, lowercased, deduped with `-2`, `-3`) and attach the identity, stamping `first_linked_at`.
+
+The `link` purpose attaches whatever identity the provider returns, including one that was previously detached: the forfeit stays, because the earns are still marked. That is the re-attach path, and it is the only one — a request naming an identity id proves nothing about who controls that provider account.
 
 Handle generation lives in `apps/api/src/auth/handles.ts` with a test for collision suffixing.
 
@@ -854,15 +858,16 @@ git add apps/api packages/ledger && git commit -m "✨ feat: single-use login ha
 
 ---
 
-### Task 11: Link, detach and re-attach endpoints
+### Task 11: Detach and identity listing
 
 **Files:**
-- Create: `apps/api/src/routes/link.ts`
-- Test: `apps/api/test/link.test.ts`
+- Create: `apps/api/src/routes/identities.ts`
+- Test: `apps/api/test/identities.test.ts`
 
 **Interfaces:**
-- Consumes: `linkIdentity`, `detachIdentity`, `consumeHandshake`, `recomputeStanding`.
-- Produces: `POST /api/me/identities/:identityId/reattach` → attaches a detached identity after the confirmation, 200 with the new standing; `POST /api/me/identities/:identityId/detach` → 200 `{ forfeitedEntries, balance, peakXp, level }` or 409 `{ error: { code: 'last_identity' } }`; `GET /api/me/identities` → list with `linked` boolean.
+- Consumes: `detachIdentity`, `getStanding`.
+- Produces: `POST /api/me/identities/:identityId/detach` → 200 `{ forfeitedEntries, balance, peakXp, level }` or 409 `{ error: { code: 'last_identity' } }` or 404; `GET /api/me/identities` → `Array<{ id, provider, displayHandle, linked }>` for the caller only.
+- Does **not** produce an attach endpoint: attaching and re-attaching happen only inside the provider callback (Task 10), because only the provider can prove who controls the account.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -871,25 +876,27 @@ it('detaches and reports the forfeit while keeping the level', async () => {})
 
 it('refuses to detach the only identity with 409 last_identity', async () => {})
 
-it('re-attaches only an identity that belongs to the caller', async () => { /* other fan's -> 404 */ })
-
-it('does not restore xp on re-attach', async () => { /* balance unchanged after reattach */ })
-
 it('rejects an unauthenticated detach', async () => { /* 401 */ })
 
 it('returns 404 when the identity id belongs to another fan', async () => {
   // guessed uuid -> 404, and the victim's identity is still attached afterwards
 })
+
+it('lists only the caller identities, with linked state', async () => {})
+
+it('offers no endpoint that attaches an identity by id', async () => {
+  // POST /api/me/identities/:id/reattach -> 404 route not found
+})
 ```
 
 - [ ] **Step 2: Run and watch it fail**
 
-Run: `pnpm --filter @ashuworld/api test test/link.test.ts`
+Run: `pnpm --filter @ashuworld/api test test/identities.test.ts`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement**
 
-All three handlers run inside `withTransaction` and call the ledger function, mapping ledger results to status codes: `already_owned` and `same_provider` → 409, `not_attached` → 409, `last_identity` → 409, unknown identity for this fan → 404. The re-attach handler must refuse an identity whose `first_linked_at` is `null` (nothing to confirm) with 409 `not_detached`.
+Both handlers run inside `withTransaction`. The detach handler scopes the selection by `fan_id = caller` so a foreign id is indistinguishable from a missing one (404, never 403 — no existence oracle). Map `last_identity` and `not_attached` to 409 with their code.
 
 - [ ] **Step 4: Run tests**
 
@@ -899,7 +906,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api && git commit -m "✨ feat: link, detach and re-attach endpoints"
+git add apps/api && git commit -m "✨ feat: detach and identity listing endpoints"
 ```
 
 ---
@@ -990,7 +997,7 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement**
 
-React Router with `createBrowserRouter`; `Account` lists identities with a detach button that calls the endpoint and shows the forfeit returned; copy states plainly that detaching deletes that account's XP for good and that the level stays. Vite dev proxy: `/api` and `/auth` to `http://localhost:3000`.
+React Router with `createBrowserRouter`; `Account` lists identities with a detach button that calls the endpoint and shows the forfeit returned; copy states plainly that detaching deletes that account's XP for good and that the level stays. Re-attaching is a fresh sign-in with that provider, so the panel links to `/auth/<provider>/start?purpose=link` and explains why. Vite dev proxy: `/api` and `/auth` to `http://localhost:3000`.
 
 - [ ] **Step 4: Run tests**
 
