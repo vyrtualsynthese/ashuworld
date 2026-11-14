@@ -213,7 +213,7 @@ describe('Xp', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders the level thresholds in order, formatted for reading', async () => {
+  it('renders the expanded level thresholds in order, formatted for reading', async () => {
     stubFetch(() => jsonResponse(GAME))
 
     renderPage(<Xp />, '/xp')
@@ -225,12 +225,15 @@ describe('Xp', () => {
       within(rows[0]!).getByRole('columnheader', { name: 'XP requis' }),
     ).toBeInTheDocument()
 
+    // Eleven levels, because the table no longer stops at the last written row.
+    expect(rows).toHaveLength(12)
     // `1500` must come out as the French `1 500`: the raw number would fail here.
-    expect(rows.slice(1).map((row) => row.textContent)).toEqual([
-      `0${formatNumber(0)}`,
-      `1${formatNumber(100)}`,
-      `2${formatNumber(1500)}`,
-    ])
+    expect(rows.slice(1).map((row) => row.textContent)).toEqual(
+      GAME.levels.map((level) => `${level.level}${formatNumber(level.minXp)}`),
+    )
+    expect(
+      within(levels).getByText(/les niveaux n'ont pas de maximum/i),
+    ).toBeInTheDocument()
     expect(within(levels).getByText(/le niveau est conservé même quand l'xp baisse/i)).toBeInTheDocument()
   })
 

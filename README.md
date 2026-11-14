@@ -16,6 +16,8 @@ numbers can be tuned against real behaviour.
 
 - **A level is never lost.** `peak_xp` is a high-water mark and the level derives from it, so a
   punishment or a detach lowers the balance but never the badge.
+- **No maximum level.** The table is a prefix; past its last row the curve keeps going, each
+  level costing more than the one before.
 - **One action, one credit.** A one-time action pays once per provider account, enforced by a
   partial unique index. Unfollowing, refollowing and re-linking cannot pay twice.
 - **Detaching is a forfeit, not a pause.** The earns are marked `forfeited_at`, never deleted, so

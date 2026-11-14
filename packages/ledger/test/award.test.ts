@@ -26,6 +26,7 @@ const cfg: GameConfig = {
     { level: 1, minXp: 100 },
     { level: 2, minXp: 300 },
   ],
+  beyond: { step: 1600, factor: 2 },
 }
 
 /** A connection that answers every statement with no rows, for the fail-closed paths. */

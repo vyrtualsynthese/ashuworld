@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
-import type { GameConfig } from '@ashuworld/gameconfig'
+import { expandLevels, type GameConfig } from '@ashuworld/gameconfig'
 import {
   getFanByHandle,
   listLadder,
@@ -102,7 +102,10 @@ export function publicGame(cfg: GameConfig): PublicGame {
       if (left.key === right.key) return 0
       return left.key < right.key ? -1 : 1
     })
-  const levels = cfg.levels.map((row) => ({ level: row.level, minXp: row.minXp }))
+  // The config writes a prefix of the ladder; the page shows the curve continuing, so it
+  // cannot imply a maximum level. Ten is enough to show the shape without turning the
+  // answer into a long list.
+  const levels = expandLevels(cfg, 10).map((row) => ({ level: row.level, minXp: row.minXp }))
   return { actions, levels }
 }
 
