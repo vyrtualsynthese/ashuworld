@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
+import { LADDER, jsonResponse, stubFetch } from './helpers'
 
 /**
  * The entry point is deliberately imported, not copied, so the test proves the real
@@ -31,9 +32,13 @@ describe('the entry point', () => {
   it('mounts the app into #root', async () => {
     vi.resetModules()
     document.body.innerHTML = '<div id="root"></div>'
+    // The root route is the ladder, so the first paint asks the api for the board.
+    stubFetch(() => jsonResponse(LADDER))
 
     await import('../src/main')
 
-    expect(await screen.findByRole('heading', { name: 'AshuWorld' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: 'Classement' }),
+    ).toBeInTheDocument()
   })
 })

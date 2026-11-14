@@ -1,5 +1,6 @@
 import {
   Link,
+  Navigate,
   NavLink,
   Outlet,
   createBrowserRouter,
@@ -7,20 +8,22 @@ import {
   type RouteObject,
 } from 'react-router-dom'
 import { Account } from './pages/Account'
-import { Home } from './pages/Home'
 import { Ladder } from './pages/Ladder'
 import { NotFound } from './pages/NotFound'
 import { Profile } from './pages/Profile'
 import { Xp } from './pages/Xp'
 
 /**
- * The frame around every page: the project's name, the four places a visitor can go, and
+ * The frame around every page: the project's name, the three places a visitor can go, and
  * whatever the route renders.
  *
  * Each page owns its own `<main>` and its own heading, so the frame cannot nest a second
  * landmark around them. The nav is named, because a page-level list of links (the ladder's
  * handles, for one) is a navigation too, and "Navigation principale" is what tells the two
  * apart.
+ *
+ * The ladder is the homepage: the board is the reason to visit, and a marketing page in
+ * front of it was one click between a newcomer and the thing they came to see.
  */
 function Layout() {
   return (
@@ -30,7 +33,11 @@ function Layout() {
           AshuWorld
         </Link>
         <nav aria-label="Navigation principale">
-          <NavLink to="/ladder">Classement</NavLink>
+          {/* `end` keeps the ladder link inactive on /xp and /account: without it, every
+              path matches `/` and the nav would always show Classement as current. */}
+          <NavLink to="/" end>
+            Classement
+          </NavLink>
           <NavLink to="/xp">Gagner de l'XP</NavLink>
           <NavLink to="/account">Mon compte</NavLink>
         </nav>
@@ -72,8 +79,9 @@ function RouteError() {
  * The route table.
  *
  * Exported as data so a test can mount the real table in memory instead of asserting
- * against a copy that could drift. `/f/:handle` is the profile; `/account` is the
- * signed-in page.
+ * against a copy that could drift. The root is the ladder, `/f/:handle` is the profile,
+ * `/account` is the signed-in page, and `/ladder` redirects so the links handed out
+ * before the move keep working.
  */
 export const routes: RouteObject[] = [
   {
@@ -81,8 +89,10 @@ export const routes: RouteObject[] = [
     element: <Layout />,
     errorElement: <RouteError />,
     children: [
-      { index: true, element: <Home /> },
-      { path: 'ladder', element: <Ladder /> },
+      { index: true, element: <Ladder /> },
+      // `replace` keeps the redirect out of the history, so Back from the board does not
+      // bounce the visitor onto /ladder and straight back here.
+      { path: 'ladder', element: <Navigate to="/" replace /> },
       { path: 'xp', element: <Xp /> },
       { path: 'f/:handle', element: <Profile /> },
       { path: 'account', element: <Account /> },
