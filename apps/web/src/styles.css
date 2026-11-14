@@ -1,0 +1,276 @@
+/*
+ * The app's whole stylesheet: a dark page that stays readable, one accent for XP, and
+ * spacing that works down to a phone. No framework, because the app has four pages and a
+ * design system would be more code than the pages it styles.
+ */
+
+:root {
+  color-scheme: dark;
+  --bg: #14121a;
+  --surface: #1e1b26;
+  --border: #322d3f;
+  --text: #eceaf2;
+  --muted: #a39db4;
+  --accent: #a78bfa;
+  --ok: #6ee7b7;
+  --danger: #fca5a5;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.site-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  align-items: baseline;
+  padding: 1rem clamp(1rem, 5vw, 2.5rem);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.site-header nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.site-header nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.site-header nav a:hover,
+.site-header nav a.active {
+  color: var(--text);
+}
+
+main.page {
+  flex: 1;
+  width: min(60rem, 100%);
+  margin: 0 auto;
+  padding: 2rem clamp(1rem, 5vw, 2.5rem) 4rem;
+}
+
+h1 {
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  margin: 0 0 0.5rem;
+}
+
+h2 {
+  font-size: 1.15rem;
+  margin: 2rem 0 0.5rem;
+}
+
+p {
+  max-width: 65ch;
+}
+
+a {
+  color: var(--accent);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.button,
+button {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0.55rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--accent);
+  color: #17131f;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.button:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.panel {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+
+.panel h1,
+.panel h2 {
+  margin-top: 0;
+}
+
+.panel-ok {
+  border-color: #25624c;
+  color: var(--ok);
+}
+
+.panel-danger {
+  border-color: #7f2d2d;
+}
+
+.panel-error h2 {
+  color: var(--danger);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.profile-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+
+.profile-header h1 {
+  width: 100%;
+  margin-bottom: 0;
+}
+
+.handle {
+  margin: 0;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.level-badge {
+  display: inline-block;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.standing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2.5rem;
+  margin: 1.5rem 0;
+}
+
+.standing dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.standing dd {
+  margin: 0;
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ladder-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.ladder-table caption {
+  margin-bottom: 0.5rem;
+  color: var(--muted);
+  text-align: left;
+}
+
+.ladder-table th,
+.ladder-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.ladder-table th {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.free-list,
+.identity-list,
+.attach-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.free-list li,
+.identity-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+.identity-list li button {
+  margin: 0 0 0 auto;
+}
+
+.provider {
+  font-weight: 600;
+}
+
+.xp {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.unit {
+  color: var(--muted);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  button,
+  .button {
+    transition: background-color 120ms ease;
+  }
+}
