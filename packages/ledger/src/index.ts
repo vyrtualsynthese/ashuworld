@@ -1,4 +1,10 @@
-export { attachIdleErrorHandler, createPool, withTransaction, type Queryable } from './db.js'
+export {
+  attachIdleErrorHandler,
+  createPool,
+  isUniqueViolation,
+  withTransaction,
+  type Queryable,
+} from './db.js'
 export { migrate, migrationFiles } from './migrate.js'
 export {
   AwardConflictError,
@@ -12,6 +18,14 @@ export {
   type IngestOutcome,
 } from './award.js'
 export { ensureIdentity, type IdentityRef } from './identity.js'
+export { HandleTakenError, createFan, type CreateFanInput } from './fans.js'
+export {
+  detachIdentity,
+  linkIdentity,
+  type DetachResult,
+  type IdentityChangeInput,
+  type LinkResult,
+} from './identities.js'
 export {
   computeBalance,
   getStanding,
