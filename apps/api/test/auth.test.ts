@@ -947,9 +947,8 @@ describe('log redaction', () => {
       throw new Error('boom')
     })
 
-    let state = ''
+    const state = await newState(app)
     try {
-      state = await newState(app)
       const res = await callback(app, { state, code: 'ashu' })
       expect(res.statusCode).toBe(302)
 

@@ -51,7 +51,7 @@ async function main(argv: readonly string[]): Promise<number> {
   process.on('SIGTERM', stop)
   process.on('SIGINT', stop)
 
-  let code = 1
+  let code: number | undefined
   try {
     code = await runCli(argv, { pool, processors: PROCESSORS, signal: controller.signal })
   } finally {
@@ -64,7 +64,7 @@ async function main(argv: readonly string[]): Promise<number> {
       code = 1
     }
   }
-  return code
+  return code ?? 1
 }
 
 try {
