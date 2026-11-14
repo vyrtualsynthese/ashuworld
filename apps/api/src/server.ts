@@ -16,6 +16,7 @@ import { registerAuthRoutes } from './routes/auth.js'
 import { registerHealthRoutes } from './routes/health.js'
 import { registerIdentityRoutes } from './routes/identities.js'
 import { registerMeRoutes } from './routes/me.js'
+import { registerPublicRoutes } from './routes/public.js'
 
 export interface ServerDeps {
   pool: Pool
@@ -186,6 +187,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   })
 
   registerHealthRoutes(app, pool)
+  registerPublicRoutes(app, { pool })
   registerMeRoutes(app, { pool, env })
   registerIdentityRoutes(app, { pool, cfg, env })
   registerAuthRoutes(app, {

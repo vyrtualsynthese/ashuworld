@@ -33,6 +33,14 @@ export {
   type Standing,
 } from './standing.js'
 export {
+  getFanByHandle,
+  listLadder,
+  type FreeStandingRow,
+  type Ladder,
+  type LadderRow,
+  type PublicFanProfile,
+} from './ladder.js'
+export {
   MAX_PENALTY_XP,
   PenaltyError,
   addPenalty,
