@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { Pool } from 'pg'
 import type { GameConfig } from '@ashuworld/gameconfig'
 import type { IdentityProfile } from '@ashuworld/providers'
@@ -6,6 +6,7 @@ import { ensureIdentity, linkIdentity, withTransaction } from '@ashuworld/ledger
 import type { Env } from '../config.js'
 import { errorBody } from '../errors.js'
 import {
+  HANDSHAKE_TTL_MINUTES,
   consumeHandshake,
   startHandshake,
   type Handshake,
@@ -42,19 +43,68 @@ const HANDSHAKE_INVALID = 'this sign-in link has expired or was already used'
 const UNAUTHENTICATED = 'sign in to continue'
 
 /**
- * Fastify hands query values through untouched. `?purpose=link&purpose=login` arrives as
- * an array, so a value is only used when it really is a string; anything else is treated
- * as missing and rejected by the route's own validation.
+ * The cookie that ties a handshake to the browser that started it.
+ *
+ * Without it, an attacker can complete a login in their own browser, stop at the 302 to
+ * the callback, and send that URL to a victim. The victim's callback would consume the
+ * state and receive a session for the attacker's fan (login CSRF). The state alone is a
+ * bearer value, so the start records it in this cookie and the callback requires the two
+ * to match before it consumes anything.
+ *
+ * `Path=/auth` keeps it away from the rest of the site, and the ten-minute lifetime
+ * matches the handshake row it protects.
+ */
+export const OAUTH_STATE_COOKIE_NAME = 'ashu_oauth_state'
+const OAUTH_STATE_PATH = '/auth'
+const OAUTH_STATE_MAX_AGE_SECONDS = HANDSHAKE_TTL_MINUTES * 60
+
+/**
+ * Fastify hands query values through untouched. A value is only used when it arrived as
+ * exactly one non-empty string; a duplicated parameter arrives as an array and must not
+ * be mistaken for its first element.
  */
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
+/**
+ * `purpose` defaults to `login` only when it is absent. A duplicated parameter
+ * (`?purpose=link&purpose=login`) or an empty value is refused rather than silently
+ * starting a login, because the two readings of the request disagree and neither is safe
+ * to guess.
+ */
 function parsePurpose(value: unknown): HandshakePurpose | null {
-  const purpose = text(value)
-  if (purpose === undefined) return 'login'
-  if (purpose === 'login' || purpose === 'link') return purpose
+  if (value === undefined) return 'login'
+  if (value === 'login' || value === 'link') return value
   return null
+}
+
+function oauthStateCookieAttributes(env: Env): {
+  httpOnly: true
+  sameSite: 'lax'
+  path: string
+  secure: boolean
+} {
+  return {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: OAUTH_STATE_PATH,
+    secure: env.COOKIE_SECURE,
+  }
+}
+
+function setOAuthStateCookie(reply: FastifyReply, env: Env, state: string): void {
+  reply.setCookie(OAUTH_STATE_COOKIE_NAME, state, {
+    ...oauthStateCookieAttributes(env),
+    maxAge: OAUTH_STATE_MAX_AGE_SECONDS,
+  })
+}
+
+function clearOAuthStateCookie(reply: FastifyReply, env: Env): void {
+  reply.clearCookie(OAUTH_STATE_COOKIE_NAME, {
+    ...oauthStateCookieAttributes(env),
+    maxAge: 0,
+  })
 }
 
 /**
@@ -219,6 +269,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         }),
       )
 
+      setOAuthStateCookie(reply, deps.env, started.state)
       return reply.redirect(started.authorizeUrl, 302)
     },
   )
@@ -226,6 +277,12 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
   app.get<{ Params: { provider: string }; Querystring: CallbackQuery }>(
     '/auth/:provider/callback',
     async (request, reply) => {
+      // Every terminal path clears the binding cookie. Doing it up front means no branch
+      // below has to remember: an error, a mismatch and a success all leave the browser
+      // with the cookie removed. Queuing it before the session cookie is set does not
+      // affect `request.cookies`, which was already parsed.
+      clearOAuthStateCookie(reply, deps.env)
+
       const provider = providers.get(request.params.provider)
       if (provider === undefined) {
         return reply.code(400).send(errorBody('unknown_provider', UNKNOWN_PROVIDER))
@@ -237,6 +294,14 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         return reply
           .code(400)
           .send(errorBody('invalid_request', 'the callback needs both a "code" and a "state"'))
+      }
+
+      // The browser-binding check happens before consumption. A callback URL copied to a
+      // victim's browser arrives without that browser's matching cookie, so it is refused
+      // and the state stays usable by the browser that really started the handshake.
+      const boundState = request.cookies[OAUTH_STATE_COOKIE_NAME]
+      if (boundState === undefined || boundState !== state) {
+        return reply.code(400).send(errorBody('handshake_invalid', HANDSHAKE_INVALID))
       }
 
       // Consumed before the exchange, so a code cannot be replayed against a second

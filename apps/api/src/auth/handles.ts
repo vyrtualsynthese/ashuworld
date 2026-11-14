@@ -27,6 +27,25 @@ export const FALLBACK_HANDLE = 'fan'
 export const MAX_HANDLE_ATTEMPTS = 100
 
 /**
+ * No free handle could be derived after the bounded number of attempts.
+ *
+ * Typed so the api can answer with a named code instead of the generic 500: the operator
+ * seeing `handle_exhausted` knows the fan was created by a provider whose display handle
+ * collided a hundred times, rather than that an unrelated query broke.
+ */
+export class HandleExhaustedError extends Error {
+  readonly displayHandle: string
+
+  constructor(displayHandle: string) {
+    super(
+      `no free handle based on "${displayHandle}" after ${MAX_HANDLE_ATTEMPTS} attempts`,
+    )
+    this.name = 'HandleExhaustedError'
+    this.displayHandle = displayHandle
+  }
+}
+
+/**
  * The first candidate: lowercased, reduced to the allowed alphabet, trimmed, and cut to
  * the schema's maximum length. Too-short results fall back to `fan`, which is itself a
  * valid handle and is then de-duplicated like any other.
@@ -88,7 +107,5 @@ export async function createFanWithUniqueHandle(
     }
   }
 
-  throw new Error(
-    `createFanWithUniqueHandle: no free handle based on "${input.displayHandle}" after ${MAX_HANDLE_ATTEMPTS} attempts`,
-  )
+  throw new HandleExhaustedError(input.displayHandle)
 }
