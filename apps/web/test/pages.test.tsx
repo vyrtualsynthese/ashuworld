@@ -29,6 +29,7 @@ describe('Ladder', () => {
       '/f/ashu',
     )
     expect(screen.getByText('320')).toBeInTheDocument()
+    expect(screen.getByText('-40')).toBeInTheDocument()
     expect(screen.getByText('Level 2')).toBeInTheDocument()
 
     const free = screen.getByRole('region', { name: /free-standing accounts/i })
@@ -111,6 +112,16 @@ describe('Profile', () => {
     expect(screen.getByText('@ashu_dc')).toBeInTheDocument()
   })
 
+  it('explains that peak xp is the highest balance ever reached', async () => {
+    stubFetch(() => jsonResponse(FAN))
+
+    renderPageAt('/f/ashu', '/f/:handle', <Profile />)
+
+    expect(
+      await screen.findByText(/peak xp is the highest balance .* ever reached/i),
+    ).toBeInTheDocument()
+  })
+
   it('asks the api for the handle in the url, escaped', async () => {
     const fetchMock = stubFetch(() => jsonResponse(FAN))
 
@@ -141,6 +152,20 @@ describe('Profile', () => {
     )
   })
 
+  it('treats a 4xx other than 404 as no such fan, not a server failure', async () => {
+    stubFetch(() =>
+      jsonResponse(
+        { error: { code: 'forbidden', message: 'this profile is not visible' } },
+        403,
+      ),
+    )
+
+    renderPageAt('/f/ashu', '/f/:handle', <Profile />)
+
+    expect(await screen.findByRole('heading', { name: /no such fan/i })).toBeInTheDocument()
+    expect(screen.queryByText(/this profile could not be loaded/i)).not.toBeInTheDocument()
+  })
+
   it('does not print the server error text when the profile fails to load', async () => {
     stubFetch(() => textResponse('<html>upstream said no</html>', 500))
 
@@ -148,6 +173,17 @@ describe('Profile', () => {
 
     expect(await screen.findByText(/this profile could not be loaded/i)).toBeInTheDocument()
     expect(screen.queryByText(/upstream said no/i)).not.toBeInTheDocument()
+  })
+
+  it('shows the retry panel when the request never reached the server', async () => {
+    stubFetch(() => {
+      throw new TypeError('fetch failed')
+    })
+
+    renderPageAt('/f/ashu', '/f/:handle', <Profile />)
+
+    expect(await screen.findByText(/this profile could not be loaded/i)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /no such fan/i })).not.toBeInTheDocument()
   })
 })
 
@@ -254,6 +290,21 @@ describe('Account, signed in', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('names the permanence of the forfeit for a later re-attach in the confirmation', async () => {
+    signedIn()
+    const user = userEvent.setup()
+
+    renderPage(<Account />, '/account')
+    await user.click(
+      await screen.findByRole('button', { name: /detach twitch account ashu_tv/i }),
+    )
+
+    const panel = screen.getByRole('region', { name: /detach your twitch account/i })
+    expect(
+      within(panel).getByText(/attaching this account again later will not bring the xp back/i),
+    ).toBeInTheDocument()
+  })
+
   it('detaches after confirmation and reports what was forfeited', async () => {
     let detached = false
     const fetchMock = signedIn((url, init) => {
@@ -280,6 +331,8 @@ describe('Account, signed in', () => {
     const notice = await screen.findByRole('status')
     expect(notice).toHaveTextContent(/3 xp entries were forfeited/i)
     expect(notice).toHaveTextContent(/your level is still 2/i)
+    expect(notice).toHaveTextContent(/attach it again later as a fresh, empty account/i)
+    expect(notice).toHaveTextContent(/the forfeit is permanent/i)
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/me/identities/${IDENTITY_ID}/detach`,
       expect.objectContaining({ method: 'POST' }),
@@ -319,16 +372,28 @@ describe('Account, signed in', () => {
   it('shows the re-attach explanation first when the login callback sends it back', async () => {
     signedIn()
 
-    renderPage(<Account />, '/account?reattach=twitch')
+    renderPage(<Account />, '/account?reattach=youtube')
 
-    const notice = await screen.findByRole('region', { name: /twitch account is detached/i })
-    expect(within(notice).getByText(/signing in does not put it back/i)).toBeInTheDocument()
+    const notice = await screen.findByRole('region', { name: /youtube account is detached/i })
+    expect(within(notice).getByText(/fresh, empty account/i)).toBeInTheDocument()
+    expect(within(notice).getByText(/the forfeit is permanent/i)).toBeInTheDocument()
     expect(
-      within(notice).getByRole('link', { name: /attach twitch again/i }),
-    ).toHaveAttribute('href', '/auth/twitch/start?purpose=link')
+      within(notice).getByRole('link', { name: /attach youtube again/i }),
+    ).toHaveAttribute('href', '/auth/youtube/start?purpose=link')
     expect(
       screen.getByRole('heading', { name: 'Ashu' }),
     ).toBeInTheDocument()
+  })
+
+  it('does not claim a provider is detached when that provider is still attached', async () => {
+    signedIn()
+
+    renderPage(<Account />, '/account?reattach=twitch')
+
+    await screen.findByRole('heading', { name: 'Ashu' })
+    expect(
+      screen.queryByRole('region', { name: /twitch account is detached/i }),
+    ).not.toBeInTheDocument()
   })
 
   it('ignores a reattach value that is not a known provider', async () => {
