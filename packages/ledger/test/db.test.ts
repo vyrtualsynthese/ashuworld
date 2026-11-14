@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Pool } from 'pg'
 import { attachIdleErrorHandler, createPool, withTransaction, type Queryable } from '../src/index.js'
-import { createTestDb, type TestDb } from './helpers/db.js'
+import { createTestDb, type TestDb } from '@ashuworld/ledger/testing'
 
 function testDatabaseUrl(): string {
   const url = process.env['TEST_DATABASE_URL']
