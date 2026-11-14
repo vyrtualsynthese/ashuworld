@@ -172,6 +172,74 @@ describe('runCli', () => {
     expect(connect).not.toHaveBeenCalled()
   })
 
+  it('raises levels from the game config on "recompute-levels" and reports the version', async () => {
+    await db.pool.query(
+      `insert into fans (handle, display_name, peak_xp, level)
+       values ('ada', 'ada', 800, 0), ('ben', 'ben', 50, 0)`,
+    )
+    const out = capture()
+    const err = capture()
+
+    const code = await runCli(['recompute-levels'], {
+      pool: db.pool,
+      processors: new Map(),
+      out: out.write,
+      err: err.write,
+    })
+
+    expect(code).toBe(0)
+    expect(err.lines).toEqual([])
+    const printed = out.lines.join('\n')
+    expect(printed).toContain('scanned 2 fans')
+    expect(printed).toContain('raised 1 levels')
+    // The version comes from the file's "version" field, not from the environment.
+    expect(printed).toContain('2026-11-14.1')
+
+    const { rows } = await db.pool.query<{ handle: string; level: number }>(
+      'select handle, level from fans order by handle',
+    )
+    expect(rows).toEqual([
+      { handle: 'ada', level: 3 },
+      { handle: 'ben', level: 0 },
+    ])
+  })
+
+  it('raises nothing on a second "recompute-levels" run over the same table', async () => {
+    await db.pool.query(
+      `insert into fans (handle, display_name, peak_xp, level)
+       values ('ada', 'ada', 800, 3)`,
+    )
+    const out = capture()
+
+    const code = await runCli(['recompute-levels'], {
+      pool: db.pool,
+      processors: new Map(),
+      out: out.write,
+      err: capture().write,
+    })
+
+    expect(code).toBe(0)
+    expect(out.lines.join('\n')).toContain('raised 0 levels')
+    expect(out.lines.join('\n')).toContain('scanned 1 fans')
+  })
+
+  it('rejects extra arguments after "recompute-levels" without touching the database', async () => {
+    const connect = vi.fn()
+    const untouched = { connect, query: vi.fn() } as unknown as Pool
+    const err = capture()
+
+    const code = await runCli(['recompute-levels', '--all'], {
+      pool: untouched,
+      processors: new Map(),
+      out: capture().write,
+      err: err.write,
+    })
+
+    expect(code).toBe(1)
+    expect(err.lines.join('\n')).toContain('recompute-levels')
+    expect(connect).not.toHaveBeenCalled()
+  })
+
   it('exits non-zero and wipes nothing when the confirmation is missing', async () => {
     await seedXp()
     process.env[CONFIG_VERSION_ENV] = '2026-11-14.1'

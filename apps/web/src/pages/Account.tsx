@@ -103,6 +103,29 @@ function ReattachPanel({ provider }: { provider: string }) {
   )
 }
 
+/**
+ * The same news, for a visitor with no session.
+ *
+ * The detach that sent them here ended the session with it, so the signed-in panel cannot
+ * be shown. Saying nothing would leave the most consequential fact unsaid: signing in
+ * with this provider does not restore what it earned. The notice comes before the sign-in
+ * panel so it is read before the button that acts on it.
+ */
+function SignedOutDetachedNotice({ provider }: { provider: string }) {
+  const label = providerLabel(provider)
+
+  return (
+    <section className="panel panel-notice" aria-labelledby="signed-out-detached-heading">
+      <h2 id="signed-out-detached-heading">Your {label} account is detached</h2>
+      <p>
+        {label} was detached from its AshuWorld account, and the XP it earned is forfeited
+        for good. Signing in with {label} again attaches it as a fresh, empty account; the
+        forfeit cannot be undone.
+      </p>
+    </section>
+  )
+}
+
 function NoticePanel({ notice }: { notice: Notice }) {
   switch (notice.kind) {
     case 'detached':
@@ -289,7 +312,10 @@ export function Account() {
 
       {resource.state === 'error' &&
         (resource.error instanceof ApiError && resource.error.status === 401 ? (
-          <SignInPanel />
+          <>
+            {reattach !== null && <SignedOutDetachedNotice provider={reattach} />}
+            <SignInPanel />
+          </>
         ) : (
           <>
             <h1>Your account</h1>

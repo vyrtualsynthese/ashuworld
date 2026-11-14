@@ -1,5 +1,6 @@
+import type { Pool } from 'pg'
 import { levelForXp, type GameConfig } from '@ashuworld/gameconfig'
-import type { Queryable } from './db.js'
+import { withTransaction, type Queryable } from './db.js'
 
 /**
  * A fan's live balance beside the record of the best standing they ever had.
@@ -160,6 +161,72 @@ export async function recomputeStanding(
   )
   const final = firstRow(settled.rows, fanId)
   return { balance, peakXp: final.peak_xp, level: final.level }
+}
+
+/** What a whole-table level pass did, for the operator who ran it. */
+export interface LevelRecompute {
+  /** Fans whose stored level moved up. Zero on a second run over the same table. */
+  raised: number
+  /** Fans examined: every row in `fans`, including those whose level was already right. */
+  scanned: number
+}
+
+/**
+ * Re-reads every fan's stored `peak_xp` through the level table in `cfg` and raises the
+ * levels that the new table puts higher. A level never falls, exactly as in
+ * `recomputeStanding`.
+ *
+ * `recomputeStanding` derives the level when an award, link, detach or penalty fires. The
+ * level table is versioned configuration, so a `game.json` change can move a threshold
+ * under fans who never act again: without this pass, their stored level stays on the old
+ * table until their next event, and the profile shows a level the current numbers do not
+ * justify. This pass is the missing half of the rule "a level only ever rises for a given
+ * peak": the peak is re-read through whatever table is current.
+ *
+ * One transaction and two statements:
+ *
+ * 1. read every fan's `peak_xp` and `level` — the derivation is `levelForXp`, the same
+ *    function `recomputeStanding` uses, so a second copy of the thresholds cannot exist;
+ * 2. raise the rows whose derived level is higher, in one `update … from (values …)`,
+ *    taking `greatest(level, …)` so a row this pass decided about cannot be demoted by a
+ *    concurrent writer between the two statements.
+ *
+ * Rows that already match, or that the table would put lower, are not written at all.
+ * That is what makes the pass idempotent: a second run finds nothing to raise and reports
+ * `raised: 0`. It is also why a fan with no activity is safe: their row is scanned, and
+ * unless the current table disagrees with it, nothing happens.
+ *
+ * Reading the whole table is deliberate at alpha scale (thousands of fans, one pass). A
+ * table large enough to make that a problem would need the thresholds in SQL, which would
+ * duplicate `levelForXp`; the read is the cheaper of the two problems.
+ */
+export async function recomputeLevels(pool: Pool, cfg: GameConfig): Promise<LevelRecompute> {
+  return withTransaction(pool, async (tx) => {
+    const { rows } = await tx.query<{ id: string; peak_xp: number; level: number }>(
+      'select id, peak_xp, level from fans order by id',
+    )
+
+    const raises: Array<{ id: string; level: number }> = []
+    for (const fan of rows) {
+      const level = levelForXp(cfg, fan.peak_xp).level
+      if (level > fan.level) raises.push({ id: fan.id, level })
+    }
+
+    if (raises.length === 0) return { raised: 0, scanned: rows.length }
+
+    const values = raises.map((_, index) => `($${index * 2 + 1}::uuid, $${index * 2 + 2}::int)`)
+    const parameters = raises.flatMap((fan) => [fan.id, fan.level])
+    const { rows: updated } = await tx.query<{ id: string }>(
+      `update fans f
+          set level = greatest(f.level, v.level)
+         from (values ${values.join(', ')}) as v(id, level)
+        where f.id = v.id
+      returning f.id`,
+      parameters,
+    )
+
+    return { raised: updated.length, scanned: rows.length }
+  })
 }
 
 /**

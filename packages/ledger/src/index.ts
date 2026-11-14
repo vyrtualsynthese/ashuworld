@@ -29,7 +29,9 @@ export {
 export {
   computeBalance,
   getStanding,
+  recomputeLevels,
   recomputeStanding,
+  type LevelRecompute,
   type Standing,
 } from './standing.js'
 export {

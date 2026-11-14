@@ -4,9 +4,9 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
-import type { GameConfig } from '@ashuworld/gameconfig'
+import { loadGameConfigFile, type GameConfig } from '@ashuworld/gameconfig'
 import { loadEnv, type Env } from '../src/config.js'
-import { loadGameConfigFromFile, start } from '../src/main.js'
+import { start } from '../src/main.js'
 
 const cfg: GameConfig = {
   version: 'test',
@@ -155,7 +155,7 @@ describe('stop', () => {
   })
 })
 
-describe('loadGameConfigFromFile', () => {
+describe('loadGameConfigFile', () => {
   it('reads a valid file', () => {
     const path = join(tempDir(), 'game.json')
     writeFileSync(
@@ -170,27 +170,27 @@ describe('loadGameConfigFromFile', () => {
       }),
     )
 
-    expect(loadGameConfigFromFile(path).version).toBe('2026-11-14.1')
+    expect(loadGameConfigFile(path).version).toBe('2026-11-14.1')
   })
 
   it('names the file when it is missing', () => {
     const path = join(tempDir(), 'missing-game.json')
-    expect(() => loadGameConfigFromFile(path)).toThrow(path)
+    expect(() => loadGameConfigFile(path)).toThrow(path)
   })
 
   it('names the file when it is not valid JSON', () => {
     const path = join(tempDir(), 'game.json')
     writeFileSync(path, '{"version": ')
 
-    expect(() => loadGameConfigFromFile(path)).toThrow(/game\.json/)
-    expect(() => loadGameConfigFromFile(path)).toThrow(/not valid JSON/)
+    expect(() => loadGameConfigFile(path)).toThrow(/game\.json/)
+    expect(() => loadGameConfigFile(path)).toThrow(/not valid JSON/)
   })
 
   it('names the file when the config inside is invalid', () => {
     const path = join(tempDir(), 'game.json')
     writeFileSync(path, JSON.stringify({ version: 'x', actions: {}, levels: [] }))
 
-    expect(() => loadGameConfigFromFile(path)).toThrow(path)
-    expect(() => loadGameConfigFromFile(path)).toThrow(/invalid/)
+    expect(() => loadGameConfigFile(path)).toThrow(path)
+    expect(() => loadGameConfigFile(path)).toThrow(/invalid/)
   })
 })

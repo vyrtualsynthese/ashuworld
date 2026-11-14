@@ -1,0 +1,56 @@
+{{- if .Values.levelRecompute.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ashuworld.fullname" . }}-level-recompute
+  labels:
+    {{- include "ashuworld.labels" . | nindent 4 }}
+    app.kubernetes.io/component: level-recompute
+  annotations:
+    # A plain Job, not a Helm hook: it is an operator action after a game.json level-table
+    # change, not part of a normal release. Render it by turning levelRecompute.enabled
+    # on, let it finish, then turn the switch off and delete the Job before the next
+    # upgrade.
+    ashuworld.io/one-shot: "true"
+spec:
+  # One attempt. The pass is idempotent, so an operator can run it again on purpose; a
+  # retry loop would only hide the error that stopped it.
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        {{- include "ashuworld.selectorLabels" (dict "root" . "component" "level-recompute") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: level-recompute
+          # The worker image: the pass is a subcommand of the worker process, so the same
+          # ledger and the same level derivation the award path uses do the work.
+          image: {{ include "ashuworld.image" (dict "root" . "component" "worker") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node", "dist/worker.js", "recompute-levels"]
+          env:
+            {{- include "ashuworld.databaseUrlEnv" . | nindent 12 }}
+            # No GAME_CONFIG_VERSION: the command loads the level table from the image's
+            # game.json, and reports the version it read. An environment copy could name
+            # a different version from the thresholds it actually applied.
+          resources:
+            {{- toYaml .Values.levelRecompute.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+{{- end }}
