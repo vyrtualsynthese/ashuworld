@@ -264,6 +264,57 @@ a:focus-visible {
   font-size: 0.9rem;
 }
 
+/* The legal footer sits under every page, so it repeats the publisher rather than pointing
+ * at one more page. It wraps to two lines on a phone instead of scrolling sideways. */
+.site-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 2rem;
+  padding: 1.25rem clamp(1rem, 5vw, 2.5rem);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.85rem;
+}
+
+.site-footer p {
+  margin: 0;
+  max-width: 70ch;
+}
+
+.site-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.site-footer a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.site-footer a:hover {
+  color: var(--text);
+}
+
+/* The legal pages are long prose: lists need the same measure as the paragraphs, and the
+ * version line needs to read as metadata rather than as the first paragraph. */
+.legal ul {
+  max-width: 65ch;
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.legal li {
+  margin: 0.3rem 0;
+}
+
+.legal-meta {
+  margin-bottom: 2rem;
+  font-size: 0.9rem;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   button,
   .button {

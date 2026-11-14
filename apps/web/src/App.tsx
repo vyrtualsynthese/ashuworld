@@ -7,15 +7,18 @@ import {
   useRouteError,
   type RouteObject,
 } from 'react-router-dom'
+import { Footer } from './components/Footer'
+import { CGU, CONFIDENTIALITE, MENTIONS_LEGALES } from './legal/content'
 import { Account } from './pages/Account'
 import { Ladder } from './pages/Ladder'
+import { LegalPage } from './pages/Legal'
 import { NotFound } from './pages/NotFound'
 import { Profile } from './pages/Profile'
 import { Xp } from './pages/Xp'
 
 /**
- * The frame around every page: the project's name, the three places a visitor can go, and
- * whatever the route renders.
+ * The frame around every page: the project's name, the three places a visitor can go,
+ * whatever the route renders, and the legal footer.
  *
  * Each page owns its own `<main>` and its own heading, so the frame cannot nest a second
  * landmark around them. The nav is named, because a page-level list of links (the ladder's
@@ -43,6 +46,7 @@ function Layout() {
         </nav>
       </header>
       <Outlet />
+      <Footer />
     </div>
   )
 }
@@ -80,8 +84,8 @@ function RouteError() {
  *
  * Exported as data so a test can mount the real table in memory instead of asserting
  * against a copy that could drift. The root is the ladder, `/f/:handle` is the profile,
- * `/account` is the signed-in page, and `/ladder` redirects so the links handed out
- * before the move keep working.
+ * `/account` is the signed-in page, the three legal documents are plain routes, and
+ * `/ladder` redirects so the links handed out before the move keep working.
  */
 export const routes: RouteObject[] = [
   {
@@ -96,6 +100,11 @@ export const routes: RouteObject[] = [
       { path: 'xp', element: <Xp /> },
       { path: 'f/:handle', element: <Profile /> },
       { path: 'account', element: <Account /> },
+      // The three legal documents are real routes, not a modal: a visitor can link to
+      // them, and the footer's addresses keep working after a reload.
+      { path: 'mentions-legales', element: <LegalPage document={MENTIONS_LEGALES} /> },
+      { path: 'confidentialite', element: <LegalPage document={CONFIDENTIALITE} /> },
+      { path: 'cgu', element: <LegalPage document={CGU} /> },
       { path: '*', element: <NotFound /> },
     ],
   },
