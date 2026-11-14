@@ -215,3 +215,31 @@ export async function ingestEvent(pool: Pool, input: IngestEventInput): Promise<
   if (outcome.kind === 'failed') throw outcome.error
   return outcome.kind
 }
+
+export interface EnqueueEventInput {
+  provider: ProviderName
+  eventId: string
+  payload: unknown
+}
+
+/** `queued` only for the call that inserted the row; `duplicate` for a redelivered event. */
+export type EnqueueOutcome = 'queued' | 'duplicate'
+
+/**
+ * Writes one connector event for the worker to pick up.
+ *
+ * Insert only: it must not run a handler, because the api and the connectors have no
+ * business opening the award transaction. `on conflict do nothing ... returning` is what
+ * distinguishes a first delivery from a redelivery in one statement, without a read that
+ * a concurrent writer could invalidate.
+ */
+export async function enqueueEvent(pool: Pool, input: EnqueueEventInput): Promise<EnqueueOutcome> {
+  const { rows } = await pool.query<{ id: string }>(
+    `insert into inbound_events (provider, event_id, payload)
+     values ($1, $2, $3)
+     on conflict (provider, event_id) do nothing
+     returning id`,
+    [input.provider, input.eventId, JSON.stringify(input.payload ?? null)],
+  )
+  return rows[0] === undefined ? 'duplicate' : 'queued'
+}

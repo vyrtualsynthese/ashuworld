@@ -4,6 +4,7 @@ import type { ProviderName } from '@ashuworld/providers'
 import {
   AwardConflictError,
   awardOnce,
+  enqueueEvent,
   ensureIdentity,
   getStanding,
   ingestEvent,
@@ -468,5 +469,49 @@ describe('ingestEvent', () => {
     ])
     expect(results.sort()).toEqual(['duplicate', 'processed'])
     expect(calls).toBe(1)
+  })
+})
+
+describe('enqueueEvent', () => {
+  let db: TestDb
+
+  beforeAll(async () => {
+    db = await createTestDb()
+  })
+
+  beforeEach(async () => {
+    await db.reset()
+  })
+
+  afterAll(async () => {
+    await db.pool.end()
+  })
+
+  it('queues an event and leaves it unprocessed', async () => {
+    expect(
+      await enqueueEvent(db.pool, {
+        provider: 'twitch',
+        eventId: 'sync:twitch:t-1:twitch.follow:2026-11',
+        payload: { kind: 'discovery', provider: 'twitch' },
+      }),
+    ).toBe('queued')
+
+    const { rows } = await db.pool.query(
+      `select payload, processed_at, attempts from inbound_events where event_id = $1`,
+      ['sync:twitch:t-1:twitch.follow:2026-11'],
+    )
+    expect(rows[0]?.processed_at).toBeNull()
+    expect(rows[0]?.attempts).toBe(0)
+    expect(rows[0]?.payload).toEqual({ kind: 'discovery', provider: 'twitch' })
+  })
+
+  it('reports a duplicate without touching the stored row', async () => {
+    const input = { provider: 'twitch' as const, eventId: 'e-dupe', payload: { n: 1 } }
+    expect(await enqueueEvent(db.pool, input)).toBe('queued')
+    expect(await enqueueEvent(db.pool, { ...input, payload: { n: 2 } })).toBe('duplicate')
+
+    const { rows } = await db.pool.query(`select payload from inbound_events where event_id = 'e-dupe'`)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.payload).toEqual({ n: 1 })
   })
 })

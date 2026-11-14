@@ -9,11 +9,14 @@ export { migrate, migrationFiles } from './migrate.js'
 export {
   AwardConflictError,
   awardOnce,
+  enqueueEvent,
   ingestEvent,
   type AwardConflictInput,
   type AwardInput,
   type AwardReason,
   type AwardResult,
+  type EnqueueEventInput,
+  type EnqueueOutcome,
   type IngestEventInput,
   type IngestOutcome,
 } from './award.js'
