@@ -166,38 +166,92 @@ describe('processOne', () => {
     }
   })
 
-  it('counts every attempt and keeps retrying past five, logging the id each time', async () => {
-    const id = await insertEvent('twitch', 'follow-3', {})
+  it('stops claiming a poison event after five failures so its provider’s queue drains', async () => {
+    const poison = await insertEvent('twitch', 'poison-1', { n: 'poison' })
+    const healthy = await insertEvent('twitch', 'healthy-1', { n: 'healthy' })
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const seen: unknown[] = []
+
+    // One provider, two events: the map is what the claim filters on, so only the attempt
+    // bound can stop the older, always-failing row from being claimed forever.
+    const processors: ProcessorMap = new Map([
+      [
+        'twitch' as const,
+        async (tx, payload) => {
+          if ((payload as { n?: string }).n === 'poison') throw new Error('always fails')
+          seen.push(payload)
+          await insertMarker()(tx, payload)
+        },
+      ],
+    ])
 
     try {
-      const failing: ProcessorMap = new Map([
-        [
-          'twitch' as const,
-          async () => {
-            throw new Error('still broken')
-          },
-        ],
-      ])
-
       for (let attempt = 1; attempt <= 5; attempt += 1) {
-        await expect(processOne(pool, failing)).resolves.toBe('empty')
+        await expect(processOne(pool, processors)).resolves.toBe('empty')
       }
 
-      const row = await storedEvent(id)
-      expect(row.attempts).toBe(5)
-      expect(row.processed_at).toBeNull()
-
+      // Five failures exhaust the bound. The row stays for the operator, but it is no
+      // longer claimable, and the healthy event behind it has not been touched yet.
+      const stuck = await storedEvent(poison)
+      expect(stuck.attempts).toBe(5)
+      expect(stuck.processed_at).toBeNull()
+      expect((await storedEvent(healthy)).processed_at).toBeNull()
       expect(errorLog).toHaveBeenCalledTimes(5)
-      for (const [index, call] of errorLog.mock.calls.entries()) {
-        const message = String(call[0])
-        expect(message).toContain(`#${id}`)
-        expect(message).toContain(`attempt ${index + 1}`)
-      }
 
-      // No dead-letter table at alpha: the row is still the oldest claimable event.
-      await expect(processOne(pool, failing)).resolves.toBe('empty')
-      expect((await storedEvent(id)).attempts).toBe(6)
+      // The next claim skips the poison row because `attempts < 5` excludes it.
+      await expect(processOne(pool, processors)).resolves.toBe('processed')
+      expect(seen).toEqual([{ n: 'healthy' }])
+      expect((await storedEvent(healthy)).processed_at).not.toBeNull()
+      expect((await storedEvent(poison)).attempts).toBe(5)
+      expect((await storedEvent(poison)).processed_at).toBeNull()
+    } finally {
+      errorLog.mockRestore()
+    }
+  })
+
+  it('does not count an attempt on a row another worker processed between rollback and increment', async () => {
+    const id = await insertEvent('twitch', 'follow-7', {})
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const failing: ProcessorMap = new Map([
+      [
+        'twitch' as const,
+        async () => {
+          throw new Error('the processor exploded')
+        },
+      ],
+    ])
+
+    // Simulates the gap the increment has to survive: the claim rolled back, and a second
+    // worker claimed, processed and committed the row before the increment ran. The wrapper
+    // is the pool handed to `processOne`; only the increment's own update is intercepted.
+    let interleaved = false
+    const racingPool = {
+      connect: async () => {
+        const client = await pool.connect()
+        return {
+          query: async (text: string, values?: unknown[]) => {
+            if (text.startsWith('update inbound_events set attempts') && !interleaved) {
+              interleaved = true
+              await pool.query('update inbound_events set processed_at = now() where id = $1', [id])
+            }
+            return client.query(text, values)
+          },
+          release: (broken?: boolean) => client.release(broken),
+        }
+      },
+    } as unknown as Pool
+
+    try {
+      await expect(processOne(racingPool, failing)).resolves.toBe('empty')
+
+      expect(interleaved).toBe(true)
+      const row = await storedEvent(id)
+      expect(row.processed_at).not.toBeNull()
+      // Without `and processed_at is null` the increment would land here and move this to 1.
+      expect(row.attempts).toBe(0)
+
+      expect(errorLog).toHaveBeenCalledTimes(1)
+      expect(String(errorLog.mock.calls[0]?.[0])).toContain('another worker processed it')
     } finally {
       errorLog.mockRestore()
     }
