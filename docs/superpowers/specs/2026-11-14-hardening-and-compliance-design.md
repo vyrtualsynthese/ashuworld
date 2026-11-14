@@ -99,10 +99,15 @@ do while the tree is small.
   | TVA intracommunautaire | FR 72 898 442 538 |
   | Activité (NAF) | 62.01Z — programmation informatique |
   | Représentant légal / directeur de publication | Valentin Ronteix |
+  | Capital social | 1 000 € |
+  | Hébergeur | ASHU DEV, auto-hébergement sur infrastructure privée, 14 rue Bausset, 75015 Paris — info@ashudev.com |
   | Contact | info@ashudev.com |
 
-  Still missing, and required: **capital social** and the **hébergeur** (hosting
-  provider's name, postal address and phone).
+  Nothing is missing. The site runs on the operator's own hardware, so the hébergeur is the
+  publisher: the mentions légales name ASHU DEV and its siège rather than a third-party
+  host, and the privacy notice declares no hosting sub-processor. The machine's physical
+  address is not published; the company address is, and that is the address that answers
+  for the data.
 
 ## Approaches
 
@@ -215,6 +220,10 @@ document metadata.
 browser that started it, 10 minutes). The notice names both, their purpose and their
 lifetime, and states that there is no tracker. A consent banner would be theatre over a
 cookie wall that does not exist.
+
+**Hosting.** The site is self-hosted, so the notice declares no hosting sub-processor and
+no transfer outside the EU. The data sits on the operator's own hardware in France, and the
+notice says so in one sentence; the processing register records it the same way.
 
 **Age and acceptance.** One migration adds to `fans`:
 
@@ -392,12 +401,9 @@ explicit statements.
 | The rate limit 429s a stream audience | Generous public default, configurable per deployment, `Retry-After` sent. |
 | Erasure damages the ledger | One transaction, one tested function, and a test that a re-link after erasure cannot pay again. |
 | Legal text drifts from the code | The compliance map names the file that satisfies each obligation; the docs branch keeps it current. |
-| Missing company facts block the release | The mentions légales render `capital` and `hébergeur` from one module; an empty value fails the build rather than shipping a blank. |
 
 ## What is still theirs
 
-- **Capital social** and **hébergeur** (name, postal address, phone): required for the
-  mentions légales.
 - Whether the site is already public, or still alpha behind a private host: it sets the
   deadline, not the content.
 - Whether 3 years of inactivity is the retention they want; shorter is allowed and the
