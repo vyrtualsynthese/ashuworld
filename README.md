@@ -99,6 +99,22 @@ Then open <http://localhost:5173>.
 tree through the mount, which is what keeps the editor and the container looking at the same
 files.
 
+#### Fill the ladder without keys
+
+The worker can run a stub source that invents Dachis, so the ladder can be tried before any
+platform application exists. Write the two switches the stub needs and start the stack:
+
+```bash
+printf 'PLATFORM_CONNECTORS=stub\nALLOW_STUB_CONNECTORS=true\nSTUB_PEOPLE=500\n' > .env
+docker compose -f compose.dev.yaml up --build
+```
+
+The worker invents 500 people, they appear as unattached rows on `/ladder`, and they can be wiped
+with `docker compose -f compose.dev.yaml down -v`.
+
+The stack reads `.env` when it is there and ignores it when it is not; `.env.example` lists every
+name the worker understands, and `.env` is git-ignored.
+
 ### Validate before pushing
 
 ```bash

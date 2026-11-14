@@ -62,6 +62,9 @@ services:
       # native watcher can miss the replacement and keep serving the previous build. Slower
       # on paper, reliable in practice, and this is a development stack.
       CHOKIDAR_USEPOLLING: "1"
+    env_file:
+      - path: .env
+        required: false
     ports:
       - "3000:3000"
       - "9229:9229"
@@ -90,6 +93,9 @@ services:
     environment:
       DATABASE_URL: postgres://ashu:ashu@db:5432/ashu
       CHOKIDAR_USEPOLLING: "1"
+    env_file:
+      - path: .env
+        required: false
     volumes:
       - .:/app
     depends_on:
