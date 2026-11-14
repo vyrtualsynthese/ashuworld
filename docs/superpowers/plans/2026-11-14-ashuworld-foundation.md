@@ -849,7 +849,7 @@ create table oauth_handshakes (
 
 `consumeHandshake` deletes the row with `returning`, which makes reuse impossible even under a race.
 
-Login resolution, in order: identity attached to a fan → that fan; identity exists but detached (`first_linked_at` set) → 302 to `/account?reattach=<provider>` and stop; identity unknown → create fan (handle from `displayHandle`, lowercased, deduped with `-2`, `-3`) and attach the identity, stamping `first_linked_at`.
+Login resolution, in order: identity attached to a fan → that fan; identity exists but detached (`first_linked_at` set) → 302 to `/account?reattach=<provider>` and stop; identity unknown → create fan (handle from `displayHandle`, lowercased, deduped with `_2`, `_3` — underscore, because `fans.handle` only allows `[a-z0-9_]`) and attach the identity, stamping `first_linked_at`.
 
 The `link` purpose attaches whatever identity the provider returns, including one that was previously detached: the forfeit stays, because the earns are still marked. That is the re-attach path, and it is the only one — a request naming an identity id proves nothing about who controls that provider account.
 
