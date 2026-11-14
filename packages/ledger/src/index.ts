@@ -12,3 +12,9 @@ export {
   type IngestOutcome,
 } from './award.js'
 export { ensureIdentity, type IdentityRef } from './identity.js'
+export {
+  computeBalance,
+  getStanding,
+  recomputeStanding,
+  type Standing,
+} from './standing.js'
