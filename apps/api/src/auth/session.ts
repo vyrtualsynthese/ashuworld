@@ -29,7 +29,13 @@ const COOKIE_PATH = '/'
 const UNAUTHENTICATED_MESSAGE = 'sign in to continue'
 const SESSION_STORE_MESSAGE = 'the database did not answer the session lookup'
 
-/** The configuration `requireFan` and the cookie helpers need, and nothing else. */
+/**
+ * The configuration the cookie helpers and `requireFan` need, and nothing else.
+ *
+ * These functions take the narrow slice so a test can hand them two fields. `AuthDeps`
+ * carries the full `Env` because the auth routes also read the per-route rate-limit
+ * budgets (`RATE_LIMIT_*`), which are set from the same object at registration time.
+ */
 export type SessionConfig = Pick<Env, 'SESSION_COOKIE_NAME' | 'COOKIE_SECURE'>
 
 export interface AuthDeps {
