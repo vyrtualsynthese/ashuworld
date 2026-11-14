@@ -112,6 +112,29 @@ describe('schema', () => {
     expect(rows[0]?.indexdef).toMatch(/where \(processed_at is null\)/i)
   })
 
+  // The retention sweep reads the last activity signal and the discovery query reads the
+  // identities still waiting to be linked. Both are partial, so each index stays
+  // proportional to what its query can return instead of to the whole table.
+  it('indexes the retention sweep and the never-linked identities', async () => {
+    const { rows } = await db.pool.query<{ indexname: string; indexdef: string }>(
+      `select indexname, indexdef from pg_indexes
+        where schemaname = current_schema()
+          and indexname in ('fans_inactive', 'provider_identities_never_linked')
+        order by indexname`,
+    )
+    expect(rows.map((r) => r.indexname)).toEqual([
+      'fans_inactive',
+      'provider_identities_never_linked',
+    ])
+    const defs = new Map(rows.map((r) => [r.indexname, r.indexdef]))
+    const inactive = defs.get('fans_inactive') ?? ''
+    expect(inactive).toMatch(/coalesce\(last_seen_at, created_at\)/i)
+    expect(inactive).toMatch(/where \(erased_at is null\)/i)
+    const neverLinked = defs.get('provider_identities_never_linked') ?? ''
+    expect(neverLinked).toContain('(created_at)')
+    expect(neverLinked).toMatch(/where \(first_linked_at is null\)/i)
+  })
+
   it('refuses a handshake purpose that is neither login nor link', async () => {
     await expect(
       db.pool.query(

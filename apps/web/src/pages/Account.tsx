@@ -94,7 +94,7 @@ function SignInPanel() {
               {devText}
             </a>
           ) : (
-            <button type="button" disabled>
+            <button type="button" className="button" disabled>
               {devText}
             </button>
           )}

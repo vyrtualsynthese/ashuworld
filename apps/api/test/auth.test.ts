@@ -873,6 +873,66 @@ describe('consent at sign-in', () => {
     })
   })
 
+  it('refuses a login callback whose handshake carried no acceptance', async () => {
+    // A handshake issued before the consent gate existed, or by an older deploy in flight.
+    const dev = createDevProvider()
+
+    await withApp(async (app) => {
+      const { state } = await withTransaction(db.pool, (tx) =>
+        startHandshake(tx, {
+          provider: dev,
+          purpose: 'login',
+          fanId: null,
+          termsVersion: null,
+          redirectUri: REDIRECT_URI,
+        }),
+      )
+
+      const res = await callback(app, { state, code: 'ada' })
+
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toEqual({
+        error: {
+          code: 'consent_required',
+          message:
+            'tu dois avoir 15 ans ou plus et accepter les CGU et la politique de confidentialité',
+        },
+      })
+      expect(sessionSetCookie(res)).toBeUndefined()
+      // No fan, no identity: the callback must not create an account nobody consented to.
+      expect(await count('fans')).toBe(0)
+      expect(await count('provider_identities')).toBe(0)
+      expect(await count('sessions')).toBe(0)
+    })
+  })
+
+  it('refuses an empty, malformed or duplicated acceptance but takes a dotted version', async () => {
+    await withApp(async (app) => {
+      const url = (accept: string): string => `/auth/dev/start?purpose=login&accept=${accept}`
+      const expected = {
+        error: {
+          code: 'consent_required',
+          message:
+            'tu dois avoir 15 ans ou plus et accepter les CGU et la politique de confidentialité',
+        },
+      }
+
+      // Empty, not a date, and duplicated (which arrives as an array) are all refusals: the
+      // value the browser sent cannot be read as one document version.
+      for (const accept of ['', 'not-a-date', '2026-11-14&accept=2026-11-14.2']) {
+        const res = await app.inject({ method: 'GET', url: url(accept) })
+        expect(res.statusCode).toBe(400)
+        expect(res.json()).toEqual(expected)
+      }
+      expect(await count('oauth_handshakes')).toBe(0)
+      expect(await count('fans')).toBe(0)
+
+      const ok = await app.inject({ method: 'GET', url: url('2026-11-14.2') })
+      expect(ok.statusCode).toBe(302)
+      expect(await count('oauth_handshakes')).toBe(1)
+    })
+  })
+
   it('records the version and timestamp when the fan is created', async () => {
     await withApp(async (app) => {
       const { res } = await login(app, 'ada')
