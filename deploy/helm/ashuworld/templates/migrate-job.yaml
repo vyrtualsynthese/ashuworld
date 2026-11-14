@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ashuworld.fullname" . }}-migrate
+  labels:
+    {{- include "ashuworld.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    # Runs before the release's own resources, on install and on every upgrade, so the
+    # schema is always ahead of the code that expects it. A failure holds the release back
+    # instead of starting an api against a schema it cannot read.
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    # A finished Job must not linger: the next upgrade has to be able to create one again,
+    # and `before-hook-creation` replaces the previous run's pod.
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  # Two attempts cover a database that is briefly unreachable. A real migration error fails
+  # both and stops the release, which is the point.
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        {{- include "ashuworld.selectorLabels" (dict "root" . "component" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          # The api image, because that is the one carrying dist/migrate.js next to
+          # /app/migrations.
+          image: {{ include "ashuworld.image" (dict "root" . "component" "api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node", "dist/migrate.js"]
+          env:
+            {{- include "ashuworld.databaseUrlEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

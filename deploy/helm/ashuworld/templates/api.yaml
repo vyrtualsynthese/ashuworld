@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ashuworld.fullname" . }}-api
+  labels:
+    {{- include "ashuworld.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "ashuworld.selectorLabels" (dict "root" . "component" "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ashuworld.selectorLabels" (dict "root" . "component" "api") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # The same uid the image declares, so `docker run` and the cluster agree. The pod is
+      # not writable by its own process: only stdout is, which is where the logs go.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: {{ include "ashuworld.image" (dict "root" . "component" "api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+              protocol: TCP
+          env:
+            {{- include "ashuworld.databaseUrlEnv" . | nindent 12 }}
+            - name: PORT
+              value: {{ .Values.api.port | quote }}
+            # Derived from the ingress host: the cookie's Secure flag and every absolute
+            # /api and /auth call assume this is the origin the browser actually uses.
+            - name: PUBLIC_BASE_URL
+              value: {{ include "ashuworld.publicBaseUrl" . | quote }}
+            # Behind the ingress, request.ip is only the client when the forwarding header
+            # is trusted. False here would log the ingress address for every fan.
+            - name: TRUST_PROXY
+              value: "true"
+            - name: GAME_CONFIG_VERSION
+              value: {{ required "game.configVersion is required" .Values.game.configVersion | quote }}
+            {{- range $name, $value := .Values.api.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+          # Readiness covers the database: a process that answers but cannot query is not
+          # ready, and the health route says so with a 503 after a bounded probe.
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      # Long enough for a request in flight to finish; `start` closes the server before the
+      # pool, so the shutdown is clean rather than a dropped connection.
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ashuworld.apiServiceName" . }}
+  labels:
+    {{- include "ashuworld.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  # ClusterIP only: the ingress and the web pod are the only callers, and nothing outside
+  # the cluster should reach the api without passing the ingress.
+  type: ClusterIP
+  selector:
+    {{- include "ashuworld.selectorLabels" (dict "root" . "component" "api") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.api.port }}
+      targetPort: http
+      protocol: TCP

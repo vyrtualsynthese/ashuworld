@@ -1,0 +1,61 @@
+{{- if .Values.alphaReset.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ashuworld.fullname" . }}-alpha-reset
+  labels:
+    {{- include "ashuworld.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alpha-reset
+  annotations:
+    # A plain Job, not a Helm hook: it is a one-shot operator action, not part of a normal
+    # release. Render it by turning alphaReset.enabled on, let it finish, then turn the
+    # switch off and delete the Job before the next upgrade.
+    ashuworld.io/one-shot: "true"
+spec:
+  # One attempt. A half-finished wipe is not something to retry blindly.
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        {{- include "ashuworld.selectorLabels" (dict "root" . "component" "alpha-reset") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: alpha-reset
+          # The worker image: the reset is a subcommand of the worker process, so the same
+          # ledger and the same pool code the loop uses perform the wipe.
+          image: {{ include "ashuworld.image" (dict "root" . "component" "worker") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node", "dist/worker.js", "reset"]
+          env:
+            {{- include "ashuworld.databaseUrlEnv" . | nindent 12 }}
+            # The confirm token comes from a Secret, never from an inline value: a typo in
+            # the chart cannot arm a destructive Job, and `helm get manifest` does not
+            # show what the value is.
+            - name: ALPHA_RESET_CONFIRM
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ashuworld.resetSecretName" . }}
+                  key: {{ .Values.alphaReset.secretKey }}
+            - name: GAME_CONFIG_VERSION
+              value: {{ required "game.configVersion is required" .Values.game.configVersion | quote }}
+          resources:
+            {{- toYaml .Values.alphaReset.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+{{- end }}

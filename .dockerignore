@@ -1,0 +1,19 @@
+# Everything the image builds do not need. The Dockerfiles copy the files they want
+# explicitly, so this list only keeps the build context small and the cache stable.
+
+.git
+.github
+.superpowers
+coverage
+**/coverage
+**/dist
+**/*.tsbuildinfo
+**/node_modules
+docs
+work
+_trash
+
+.env
+.env.*
+
+.DS_Store
