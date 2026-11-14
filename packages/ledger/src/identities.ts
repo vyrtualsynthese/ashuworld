@@ -18,6 +18,26 @@ export interface IdentityChangeInput {
 }
 
 /**
+ * Refuses a caller that passed a bare pool instead of an open transaction.
+ *
+ * Both account changes depend on statement lifetime: a `for update` lock is held until the
+ * transaction ends, and the savepoint that turns a unique violation back into a refusal
+ * only exists inside one. On a bare pool each statement autocommits on whichever
+ * connection the pool hands out — so `detachIdentity` would release its fan lock before
+ * the count is even decided, and two concurrent detaches could each unlink one of the
+ * fan's two identities, leaving the zero-identity account the rule forbids. A failure
+ * halfway through would also leave the forfeit committed without the unlink.
+ *
+ * Postgres rejects `savepoint` outside a transaction block ("SAVEPOINT can only be used in
+ * transaction blocks"), so this pair is the cheapest enforcement the database offers. It
+ * costs two round trips inside a real transaction.
+ */
+async function requireTransaction(tx: Queryable): Promise<void> {
+  await tx.query('savepoint ledger_tx_required')
+  await tx.query('release savepoint ledger_tx_required')
+}
+
+/**
  * Attaches a provider identity to a fan, unless the identity is somebody else's or the fan
  * already holds that provider.
  *
@@ -38,11 +58,17 @@ export interface IdentityChangeInput {
  * moment can both pass it. The unique `(fan_id, provider)` index refuses the second write;
  * the savepoint turns that refusal back into `same_provider` and leaves the caller's
  * transaction usable, instead of surfacing a raw unique violation.
+ *
+ * The first statements are a savepoint pair that exists only to refuse a bare pool. See
+ * `requireTransaction` below: documentation alone is not enough, because the damage from
+ * running outside a transaction is silent.
  */
 export async function linkIdentity(
   tx: Queryable,
   input: IdentityChangeInput,
 ): Promise<LinkResult> {
+  await requireTransaction(tx)
+
   const locked = await tx.query<{ fan_id: string | null; provider: string }>(
     `select fan_id, provider
        from provider_identities
@@ -83,8 +109,11 @@ export async function linkIdentity(
     if (!isUniqueViolation(error, 'provider_identities_fan_id_provider_key')) throw error
     // The competing link committed while this one was waiting on the index. Returning
     // from an aborted transaction would fail at commit, so undo the failed statement
-    // first, then report the refusal the caller can act on.
+    // first, then report the refusal the caller can act on. The savepoint is released
+    // rather than left defined, so the caller's transaction does not carry a subtransaction
+    // until commit.
     await tx.query('rollback to savepoint link_identity')
+    await tx.query('release savepoint link_identity')
     return { ok: false, reason: 'same_provider' }
   }
   await tx.query('release savepoint link_identity')
@@ -104,7 +133,8 @@ export async function linkIdentity(
 /**
  * Detaches an identity from its fan and forfeits that identity's earns.
  *
- * Must run inside a transaction for the same reason as `linkIdentity`.
+ * Must run inside a transaction, and `requireTransaction` enforces it: the fan lock is only
+ * meaningful for the length of one transaction.
  *
  * The fan row is locked first and the count happens after the lock. Counting first is the
  * trap: two detaches of the same fan's two identities would each count two, each detach
@@ -120,6 +150,8 @@ export async function detachIdentity(
   tx: Queryable,
   input: IdentityChangeInput,
 ): Promise<DetachResult> {
+  await requireTransaction(tx)
+
   const fan = await tx.query<{ id: string }>('select id from fans where id = $1 for update', [
     input.fanId,
   ])
