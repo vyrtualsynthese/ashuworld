@@ -217,7 +217,7 @@ describe('Account, signed out', () => {
     expect(screen.queryByRole('link', { name: /dev account/i })).not.toBeInTheDocument()
   })
 
-  it('warns a signed-out fan from a detach that the forfeit is permanent', async () => {
+  it('warns a signed-out fan from a detach and names the way back', async () => {
     vi.stubEnv('VITE_DEV_LOGIN', 'true')
     stubFetch(() =>
       jsonResponse({ error: { code: 'unauthenticated', message: 'sign in to continue' } }, 401),
@@ -228,6 +228,16 @@ describe('Account, signed out', () => {
     const notice = await screen.findByRole('region', { name: /twitch account is detached/i })
     expect(within(notice).getByText(/forfeited for good/i)).toBeInTheDocument()
     expect(within(notice).getByText(/forfeit cannot be undone/i)).toBeInTheDocument()
+    // The way back starts from an account that still works, then a fresh attach.
+    expect(
+      within(notice).getByText(/sign in with an account that is still attached/i),
+    ).toBeInTheDocument()
+    expect(within(notice).getByText(/start a fresh twitch sign-in/i)).toBeInTheDocument()
+    // Signing in with the detached provider loops back here, so the notice must not
+    // promise that it reattaches anything.
+    expect(
+      within(notice).queryByText(/signing in with twitch again attaches it/i),
+    ).not.toBeInTheDocument()
 
     // The news comes before the button that acts on it: the panel must precede sign-in.
     const signIn = screen.getByRole('region', { name: /sign in to ashuworld/i })
