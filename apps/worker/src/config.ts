@@ -33,8 +33,12 @@ const CONNECTOR_NAMES: readonly ConnectorName[] = ['stub']
 
 const DEFAULT_STUB_PEOPLE = 250
 const MAX_STUB_PEOPLE = 5_000
-const DEFAULT_SYNC_INTERVAL_SECONDS = 900
+/** Fifteen minutes: the sync cadence, also the fallback when the variable is absent. */
+export const DEFAULT_SYNC_INTERVAL_SECONDS = 900
 const MAX_SYNC_INTERVAL_SECONDS = 31_536_000
+
+/** The only shape a count or interval may take: plain decimal digits, nothing else. */
+const PLAIN_INTEGER = /^\d+$/
 
 /** A required variable, or a plain error that names it. Empty is missing, and the value is trimmed. */
 function required(raw: NodeJS.ProcessEnv, name: string): string {
@@ -64,9 +68,11 @@ function flag(raw: NodeJS.ProcessEnv, name: string): boolean {
 /**
  * An integer in range, or `fallback` when absent.
  *
- * `Number` alone is too generous: `2.5` and `1e3` parse, and an empty string is `0`.
- * Every value that is not a whole number inside the range is a startup error naming the
- * variable, because a bad count or interval only surfaces later as odd data.
+ * `Number` alone is too generous: `2.5` and `-1` parse, `1e3` and `0x10` parse as other
+ * numbers than they look, and an empty string is `0`. So the text must be plain decimal
+ * digits before it is converted. Every value that is not a whole number inside the range
+ * is a startup error naming the variable, because a bad count or interval only surfaces
+ * later as odd data.
  */
 function integer(
   raw: NodeJS.ProcessEnv,
@@ -77,8 +83,14 @@ function integer(
 ): number {
   const value = raw[name]
   if (value === undefined || value.trim() === '') return fallback
-  const parsed = Number(value)
-  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+  const text = value.trim()
+  if (!PLAIN_INTEGER.test(text)) {
+    throw new Error(
+      `${name} must be an integer between ${min} and ${max}, got ${JSON.stringify(value)}`,
+    )
+  }
+  const parsed = Number(text)
+  if (parsed < min || parsed > max) {
     throw new Error(
       `${name} must be an integer between ${min} and ${max}, got ${JSON.stringify(value)}`,
     )

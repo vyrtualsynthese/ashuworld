@@ -33,7 +33,7 @@ describe('loadWorkerEnv', () => {
     )
   })
 
-  it.each(['0', '5001', 'abc', '2.5'])('refuses STUB_PEOPLE=%s', (value) => {
+  it.each(['0', '5001', 'abc', '2.5', '1e3', '0x10'])('refuses STUB_PEOPLE=%s', (value) => {
     expect(() =>
       loadWorkerEnv({
         ...base,
@@ -42,6 +42,23 @@ describe('loadWorkerEnv', () => {
         STUB_PEOPLE: value,
       }),
     ).toThrow(/STUB_PEOPLE/)
+  })
+
+  it.each(['0', '31536001', 'abc', '2.5', '1e3', '0x10'])(
+    'refuses SYNC_INTERVAL_SECONDS=%s',
+    (value) => {
+      expect(() => loadWorkerEnv({ ...base, SYNC_INTERVAL_SECONDS: value })).toThrow(
+        /SYNC_INTERVAL_SECONDS/,
+      )
+    },
+  )
+
+  it('accepts 900 seconds and the interval boundaries', () => {
+    const load = (seconds: string) =>
+      loadWorkerEnv({ ...base, SYNC_INTERVAL_SECONDS: seconds }).SYNC_INTERVAL_SECONDS
+    expect(load('900')).toBe(900)
+    expect(load('1')).toBe(1)
+    expect(load('31536000')).toBe(31_536_000)
   })
 
   it('accepts the boundaries', () => {
