@@ -6,13 +6,26 @@ import { screen } from '@testing-library/react'
  * `index.html` contract: the app mounts into `#root`. The missing-root test comes first
  * because the module is cached after the first successful import; resetting the module
  * registry between the two is what lets the throw happen.
+ *
+ * The thrown value is read explicitly rather than through `rejects.toThrow`: on Vitest 5,
+ * a dynamically imported module that throws rejects with an `Error` whose message is
+ * dropped by that matcher, so the assertion passed only on the type and proved nothing
+ * about the sentence.
  */
 describe('the entry point', () => {
   it('fails loudly when the page has no mount point', async () => {
     vi.resetModules()
     document.body.innerHTML = ''
 
-    await expect(import('../src/main')).rejects.toThrow(/root/)
+    let thrown: unknown
+    try {
+      await import('../src/main')
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toMatch(/root/)
   })
 
   it('mounts the app into #root', async () => {

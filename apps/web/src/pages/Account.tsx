@@ -46,9 +46,9 @@ function signInHref(provider: string, purpose: 'login' | 'link'): string {
 
 /** The one sentence about a forfeit, so the confirmation and the result cannot disagree. */
 function forfeitSentence(entries: number): string {
-  if (entries === 0) return 'No XP entries were forfeited'
-  if (entries === 1) return '1 XP entry was forfeited'
-  return `${formatNumber(entries)} XP entries were forfeited`
+  if (entries === 0) return 'Aucune entrée d’XP n’a été perdue'
+  if (entries === 1) return '1 entrée d’XP a été perdue'
+  return `${formatNumber(entries)} entrées d’XP ont été perdues`
 }
 
 function SignInPanel() {
@@ -56,48 +56,50 @@ function SignInPanel() {
 
   return (
     <section className="panel" aria-labelledby="sign-in-heading">
-      <h1 id="sign-in-heading">Sign in to AshuWorld</h1>
+      <h1 id="sign-in-heading">Se connecter à AshuWorld</h1>
       <p>
-        Your XP, your level and the accounts attached to you all live in one place. Sign in
-        with a provider you already use and this page will show them.
+        Ton XP, ton niveau et les comptes rattachés vivent au même endroit. Connecte-toi
+        avec une plateforme que tu utilises déjà et cette page les affichera.
       </p>
       {devDoor ? (
         <>
           <p className="muted">
-            This deployment offers the dev sign-in only. It signs you in as a named test
-            account and proves nothing, so it is not for real fans.
+            Ce déploiement ne propose que la connexion de développement. Elle te connecte à
+            un compte de test nommé et ne prouve rien : elle n’est pas destinée aux vrais
+            Dachis.
           </p>
           <a className="button" href={signInHref('dev', 'login')}>
-            Sign in with the dev account
+            Se connecter avec le compte de développement
           </a>
         </>
       ) : (
         <p className="muted">
-          Sign-in is not switched on for this deployment. Ask whoever runs AshuWorld to
-          configure a provider.
+          La connexion n’est pas activée sur ce déploiement. Demande à la personne qui gère
+          AshuWorld de configurer une plateforme.
         </p>
       )}
     </section>
   )
 }
 
-/** The explanation shown when a login returned an account that the fan once detached. */
+/** The explanation shown when a login returned an account that the Dachi once detached. */
 function ReattachPanel({ provider }: { provider: string }) {
   const label = providerLabel(provider)
 
   return (
     <section className="panel panel-notice" aria-labelledby="reattach-heading">
-      <h2 id="reattach-heading">Your {label} account is detached</h2>
+      <h2 id="reattach-heading">Ton compte {label} est détaché</h2>
       <p>
-        You signed in with {label}, but that account is not attached to your AshuWorld
-        account. You can attach it again later as a fresh, empty account; the forfeit is
-        permanent.
+        Tu t’es connecté avec {label}, mais ce compte n’est pas rattaché à ton compte
+        AshuWorld. Tu pourras le rattacher plus tard comme un compte neuf et vide ; la perte
+        est définitive.
       </p>
       <p>
-        To attach it again, start a fresh {label} sign-in that asks to link the account.
+        Pour le rattacher, lance une nouvelle connexion {label} qui demande à lier le
+        compte.
       </p>
       <a className="button" href={signInHref(provider, 'link')}>
-        Attach {label} again
+        Rattacher {label}
       </a>
     </section>
   )
@@ -108,7 +110,7 @@ function ReattachPanel({ provider }: { provider: string }) {
  *
  * The detach that sent them here ended the session with it, so the signed-in panel cannot
  * be shown. Saying nothing would leave the most consequential fact unsaid: signing in
- * with this provider does not restore what it earned, and sending the fan down that route
+ * with this provider does not restore what it earned, and sending the Dachi down that route
  * again only returns them to this page. So the notice names the path that works: sign in
  * with an account that is still attached, then attach this one. It comes before the
  * sign-in panel so it is read before the button that acts on it.
@@ -118,17 +120,17 @@ function SignedOutDetachedNotice({ provider }: { provider: string }) {
 
   return (
     <section className="panel panel-notice" aria-labelledby="signed-out-detached-heading">
-      <h2 id="signed-out-detached-heading">Your {label} account is detached</h2>
+      <h2 id="signed-out-detached-heading">Ton compte {label} est détaché</h2>
       <p>
-        {label} was detached from its AshuWorld account, and the XP it earned is forfeited
-        for good.
+        {label} a été détaché de son compte AshuWorld, et l’XP qu’il a gagnée est perdue
+        pour toujours.
       </p>
       <p>
-        Signing in with {label} again does not bring it back: that route ends without a
-        session and returns to this page. To attach it again, first sign in with an account
-        that is still attached. Then start a fresh {label} sign-in and choose to attach
-        that account. It comes back as a new, empty account, with none of its old XP. The
-        forfeit cannot be undone.
+        Se reconnecter avec {label} ne la rapportera pas : cette route se termine sans
+        session et revient sur cette page. Pour le rattacher, connecte-toi d’abord avec un
+        compte encore rattaché, puis lance une nouvelle connexion {label} et choisis de
+        rattacher le compte. Il revient comme un compte neuf et vide. La perte est
+        définitive.
       </p>
     </section>
   )
@@ -140,36 +142,38 @@ function NoticePanel({ notice }: { notice: Notice }) {
       return (
         <div className="panel panel-ok" role="status">
           <p>
-            Your {providerLabel(notice.provider)} account @{notice.displayHandle} is
-            detached. {forfeitSentence(notice.forfeitedEntries)}, and your XP to spend is
-            now {formatNumber(notice.balance)}. Your level is still {notice.level}. You can
-            attach it again later as a fresh, empty account; the forfeit is permanent.
+            Ton compte {providerLabel(notice.provider)} @{notice.displayHandle} est détaché.
+            {' '}
+            {forfeitSentence(notice.forfeitedEntries)}, et ton XP est maintenant{' '}
+            {formatNumber(notice.balance)}. Ton niveau est toujours {notice.level}. Tu
+            pourras le rattacher plus tard comme un compte neuf et vide ; la perte est
+            définitive.
           </p>
         </div>
       )
     case 'last_identity':
       return (
         <div className="panel panel-error" role="alert">
-          <h2>This is the only way into your account</h2>
+          <h2>C’est ta seule porte d’entrée</h2>
           <p>
-            You cannot detach this account, because it is the only way into your AshuWorld
-            account. Attach another provider account first, then detach this one if you
-            still want to.
+            Tu ne peux pas détacher ce compte : c’est la seule façon d’accéder à ton compte
+            AshuWorld. Rattache d’abord une autre plateforme, puis détache celui-ci si tu le
+            souhaites.
           </p>
         </div>
       )
     case 'detach_failed':
       return (
         <div className="panel panel-error" role="alert">
-          <h2>That account could not be detached</h2>
-          <p>Nothing was changed. Please try again in a moment.</p>
+          <h2>Ce compte n’a pas pu être détaché</h2>
+          <p>Rien n’a été modifié. Réessaie dans un instant.</p>
         </div>
       )
     case 'sign_out_failed':
       return (
         <div className="panel panel-error" role="alert">
-          <h2>Signing out did not work</h2>
-          <p>Your session is still open. Reload the page and try again.</p>
+          <h2>La déconnexion n’a pas fonctionné</h2>
+          <p>Ta session est toujours ouverte. Recharge la page et réessaie.</p>
         </div>
       )
   }
@@ -187,7 +191,7 @@ interface DetachConfirmProps {
  *
  * The promise is stated in full because the action cannot be undone: the XP that account
  * earned is forfeited permanently, while the level and the peak are records that only ever
- * move forward. A fan deciding to disconnect must not learn either half afterwards.
+ * move forward. A Dachi deciding to disconnect must not learn either half afterwards.
  */
 function DetachConfirm({ identity, busy, onConfirm, onCancel }: DetachConfirmProps) {
   const label = providerLabel(identity.provider)
@@ -195,19 +199,19 @@ function DetachConfirm({ identity, busy, onConfirm, onCancel }: DetachConfirmPro
   return (
     <section className="panel panel-danger" aria-labelledby="detach-heading">
       <h2 id="detach-heading">
-        Detach your {label} account @{identity.displayHandle}?
+        Détacher ton compte {label} @{identity.displayHandle} ?
       </h2>
       <p>
-        This cannot be undone. The XP this account earned is forfeited for good: it leaves
-        your balance, and attaching this account again later will not bring the XP back.
-        Your level and your peak XP stay where they are.
+        Cette action est définitive. L’XP gagnée par ce compte est perdue pour toujours :
+        elle quitte ton total, et rattacher ce compte plus tard ne la rapportera pas. Ton
+        niveau et ton XP maximal restent inchangés.
       </p>
       <div className="actions">
         <button type="button" onClick={onConfirm} disabled={busy}>
-          Yes, detach it
+          Oui, détacher
         </button>
         <button type="button" onClick={onCancel} disabled={busy}>
-          Keep it attached
+          Le garder rattaché
         </button>
       </div>
     </section>
@@ -221,21 +225,23 @@ function AttachPanel({ me }: { me: Me }) {
 
   return (
     <section aria-labelledby="attach-heading">
-      <h2 id="attach-heading">Attach another account</h2>
+      <h2 id="attach-heading">Rattacher un autre compte</h2>
       <p>
-        Attaching an account starts that provider&apos;s sign-in, because only the provider
-        can prove the account is yours. If a provider is not switched on for this
-        deployment, the sign-in will say so.
+        Rattacher un compte lance la connexion de cette plateforme, car elle seule peut
+        prouver que le compte est le tien. Si une plateforme n’est pas activée sur ce
+        déploiement, la connexion le dira.
       </p>
       {available.length === 0 ? (
-        <p className="muted">Every provider AshuWorld knows is already attached.</p>
+        <p className="muted">
+          Toutes les plateformes connues d’AshuWorld sont déjà rattachées.
+        </p>
       ) : (
         <ul className="attach-list">
           {available.map((provider) => (
             <li key={provider}>
               {/* A full navigation: the handshake is served by the api. */}
               <a href={signInHref(provider, 'link')}>
-                Attach {providerLabel(provider)} account
+                Rattacher un compte {providerLabel(provider)}
               </a>
             </li>
           ))}
@@ -251,7 +257,7 @@ function AttachPanel({ me }: { me: Me }) {
  * `GET /api/me` is the whole state. A 401 is not an error here — it is the ordinary
  * answer for a visitor with no session, and the page shows the way in. Any other failure
  * is the page's own sentence plus a retry: the api's message is written for a caller, not
- * for a fan, and is never rendered.
+ * for a Dachi, and is never rendered.
  *
  * Detaching asks first, then reports what the server actually forfeited. The numbers come
  * back in the response rather than being guessed from the pre-detach profile, so the
@@ -313,8 +319,8 @@ export function Account() {
 
       {resource.state === 'loading' && (
         <>
-          <h1>Your account</h1>
-          <p className="muted">Checking whether you are signed in…</p>
+          <h1>Ton compte</h1>
+          <p className="muted">Vérification de ta session…</p>
         </>
       )}
 
@@ -326,12 +332,12 @@ export function Account() {
           </>
         ) : (
           <>
-            <h1>Your account</h1>
+            <h1>Ton compte</h1>
             <section className="panel panel-error" aria-labelledby="account-error-heading">
-              <h2 id="account-error-heading">Your account could not be loaded</h2>
-              <p>The server did not answer, so there is nothing to show yet.</p>
+              <h2 id="account-error-heading">Ton compte n’a pas pu être chargé</h2>
+              <p>Le serveur n’a pas répondu, il n’y a donc rien à afficher pour l’instant.</p>
               <button type="button" onClick={reload}>
-                Try again
+                Réessayer
               </button>
             </section>
           </>
@@ -346,7 +352,7 @@ export function Account() {
             </p>
             <LevelBadge level={resource.data.level} />
             <button type="button" onClick={() => void handleSignOut()} disabled={busy}>
-              Sign out
+              Se déconnecter
             </button>
           </header>
 
@@ -357,23 +363,25 @@ export function Account() {
 
           <dl className="standing">
             <div>
-              <dt>XP to spend</dt>
+              <dt>XP</dt>
               <dd>{formatNumber(resource.data.balance)}</dd>
             </div>
             <div>
-              <dt>Peak XP</dt>
+              <dt>XP maximal</dt>
               <dd>{formatNumber(resource.data.peakXp)}</dd>
             </div>
           </dl>
 
           <section aria-labelledby="identities-heading">
-            <h2 id="identities-heading">Attached accounts</h2>
+            <h2 id="identities-heading">Comptes rattachés</h2>
             <p>
-              Each account below is a way into AshuWorld. Detaching one asks you to confirm
-              first, because its XP is forfeited permanently.
+              Chaque compte ci-dessous est une porte d’entrée dans AshuWorld. En détacher un
+              demande confirmation, car son XP est perdu définitivement.
             </p>
             {resource.data.identities.length === 0 ? (
-              <p className="muted">No provider account is attached to this fan account.</p>
+              <p className="muted">
+                Aucun compte de plateforme n’est rattaché à ce compte Dachi.
+              </p>
             ) : (
               <ul className="identity-list">
                 {resource.data.identities.map((identity) => (
@@ -382,14 +390,14 @@ export function Account() {
                     <span className="handle">@{identity.displayHandle}</span>
                     <button
                       type="button"
-                      aria-label={`Detach ${providerLabel(identity.provider)} account ${identity.displayHandle}`}
+                      aria-label={`Détacher le compte ${providerLabel(identity.provider)} ${identity.displayHandle}`}
                       onClick={() => {
                         setNotice(null)
                         setDetaching(identity)
                       }}
                       disabled={busy}
                     >
-                      Detach
+                      Détacher
                     </button>
                   </li>
                 ))}

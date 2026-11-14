@@ -32,14 +32,15 @@ describe('providers', () => {
   it('labels the known providers and gives an unknown one a neutral label', () => {
     expect(providerLabel('youtube')).toBe('YouTube')
     expect(providerLabel('twitch')).toBe('Twitch')
-    expect(providerLabel('mystery')).toBe('Unknown provider')
-    expect(providerLabel('<script>')).toBe('Unknown provider')
+    expect(providerLabel('mystery')).toBe('Plateforme inconnue')
+    expect(providerLabel('<script>')).toBe('Plateforme inconnue')
   })
 })
 
 describe('formatNumber', () => {
-  it('groups thousands so a big balance stays readable', () => {
+  it('groups thousands the French way, so a balance is not printed in English', () => {
     expect(formatNumber(320)).toBe('320')
-    expect(formatNumber(1240)).toBe('1,240')
+    // A narrow no-break space (U+202F), not the English comma.
+    expect(formatNumber(1240)).toBe('1\u202f240')
   })
 })

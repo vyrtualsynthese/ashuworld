@@ -18,7 +18,8 @@ import { Profile } from './pages/Profile'
  *
  * Each page owns its own `<main>` and its own heading, so the frame cannot nest a second
  * landmark around them. The nav is named, because a page-level list of links (the ladder's
- * handles, for one) is a navigation too, and "Main" is what tells the two apart.
+ * handles, for one) is a navigation too, and "Navigation principale" is what tells the two
+ * apart.
  */
 function Layout() {
   return (
@@ -27,9 +28,9 @@ function Layout() {
         <Link className="brand" to="/">
           AshuWorld
         </Link>
-        <nav aria-label="Main">
-          <NavLink to="/ladder">Ladder</NavLink>
-          <NavLink to="/account">Account</NavLink>
+        <nav aria-label="Navigation principale">
+          <NavLink to="/ladder">Classement</NavLink>
+          <NavLink to="/account">Mon compte</NavLink>
         </nav>
       </header>
       <Outlet />
@@ -53,13 +54,13 @@ function RouteError() {
 
   return (
     <main className="page">
-      <h1>Something went wrong</h1>
+      <h1>Quelque chose s’est mal passé</h1>
       <p>
-        This page could not be shown. Nothing you earned is lost — the ledger is kept by the
-        server, not by this page.
+        Cette page n’a pas pu s’afficher. Rien de ce que tu as gagné n’est perdu : le
+        registre est tenu par le serveur, pas par cette page.
       </p>
       <Link className="button" to="/">
-        Go to the home page
+        Aller à l’accueil
       </Link>
     </main>
   )

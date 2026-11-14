@@ -11,15 +11,15 @@ export function Home() {
     <main className="page">
       <h1>AshuWorld</h1>
       <p>
-        AshuWorld turns what you already do with Ashu — watching, subscribing and
-        following — into XP, and XP into a level that is yours to keep.
+        AshuWorld transforme ce que tu fais déjà avec Ashu — regarder, s’abonner, suivre —
+        en XP, et l’XP en niveau qui t’appartient pour toujours.
       </p>
       <p>
-        Every fan account sits on one ladder, ranked by the XP it can spend right now, and
-        each provider account you attach adds its XP to the same total.
+        Chaque compte Dachi figure sur le même classement, trié par XP. Chaque compte de
+        plateforme que tu rattaches ajoute son XP au même total.
       </p>
       <Link className="button" to="/ladder">
-        See the ladder
+        Voir le classement
       </Link>
     </main>
   )

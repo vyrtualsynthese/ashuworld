@@ -14,16 +14,16 @@ describe('the route table', () => {
     renderAt('/')
 
     expect(await screen.findByRole('heading', { name: 'AshuWorld' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /see the ladder/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /voir le classement/i })).toHaveAttribute(
       'href',
       '/ladder',
     )
-    const nav = screen.getByRole('navigation', { name: /main/i })
-    expect(within(nav).getByRole('link', { name: /ladder/i })).toHaveAttribute(
+    const nav = screen.getByRole('navigation', { name: /navigation principale/i })
+    expect(within(nav).getByRole('link', { name: /classement/i })).toHaveAttribute(
       'href',
       '/ladder',
     )
-    expect(within(nav).getByRole('link', { name: /account/i })).toHaveAttribute(
+    expect(within(nav).getByRole('link', { name: /mon compte/i })).toHaveAttribute(
       'href',
       '/account',
     )
@@ -34,7 +34,9 @@ describe('the route table', () => {
 
     renderAt('/ladder')
 
-    expect(await screen.findByRole('heading', { name: 'Ladder' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: 'Classement', level: 1 }),
+    ).toBeInTheDocument()
     expect(await screen.findByRole('link', { name: 'ashu' })).toBeInTheDocument()
   })
 
@@ -57,8 +59,10 @@ describe('the route table', () => {
   it('has a friendly page for a path that matches no route', async () => {
     renderAt('/no-such-page')
 
-    expect(await screen.findByRole('heading', { name: /page not found/i })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /back to the ladder/i })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: /page introuvable/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /retour au classement/i })).toBeInTheDocument()
   })
 
   it('shows a friendly page when a route throws, never the error text', async () => {
@@ -78,10 +82,13 @@ describe('the route table', () => {
       render(<RouterProvider router={router} />)
 
       expect(
-        await screen.findByRole('heading', { name: /something went wrong/i }),
+        await screen.findByRole('heading', { name: /quelque chose s’est mal passé/i }),
       ).toBeInTheDocument()
       expect(screen.queryByText(/route exploded/)).not.toBeInTheDocument()
-      expect(screen.getByRole('link', { name: /home page/i })).toHaveAttribute('href', '/')
+      expect(screen.getByRole('link', { name: /aller à l’accueil/i })).toHaveAttribute(
+        'href',
+        '/',
+      )
     } finally {
       consoleError.mockRestore()
     }

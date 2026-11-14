@@ -6,79 +6,124 @@ import { providerLabel } from '../providers'
 import { useResource } from '../useResource'
 
 /**
- * The download is not the page: the two lists get their own sections so a screen reader
- * announces "Fan accounts" and "Free-standing accounts" before either list, and the empty
- * cases say what they mean instead of leaving a table with no rows.
+ * One row of the board, whichever kind of account produced it.
+ *
+ * The api sends two lists because a Dachi and a never-attached provider account are
+ * different things to the ledger. The reader has one question — who has the most XP — so
+ * the two are merged here, in the browser. `name` is the row's sort key: the handle for a
+ * Dachi, the provider handle for an account with no Dachi yet.
+ */
+type LadderRow =
+  | {
+      kind: 'dachi'
+      key: string
+      name: string
+      handle: string
+      level: number
+      xp: number
+    }
+  | {
+      kind: 'account'
+      key: string
+      name: string
+      provider: string
+      displayHandle: string
+      xp: number
+    }
+
+/**
+ * The two api lists as one ranked list.
+ *
+ * The sort is by XP descending, then by name ascending in French, so equal totals come out
+ * in a stable, alphabetical order rather than in whatever order the two lists arrived.
+ * XP, not level: the level comes from `peak_xp` and only ever rises, so ranking by it would
+ * put someone who was punished above the account that is ahead now.
+ */
+function mergeLadder(ladder: LadderData): LadderRow[] {
+  const rows: LadderRow[] = [
+    ...ladder.linked.map((fan) => ({
+      kind: 'dachi' as const,
+      key: fan.fanId,
+      name: fan.handle,
+      handle: fan.handle,
+      level: fan.level,
+      xp: fan.balance,
+    })),
+    ...ladder.freeStanding.map((account) => ({
+      kind: 'account' as const,
+      key: account.identityId,
+      name: account.displayHandle,
+      provider: account.provider,
+      displayHandle: account.displayHandle,
+      xp: account.xp,
+    })),
+  ]
+
+  return rows.sort((left, right) => {
+    if (left.xp !== right.xp) return right.xp - left.xp
+    return left.name.localeCompare(right.name, 'fr')
+  })
+}
+
+/**
+ * The board itself.
+ *
+ * A Dachi row carries a profile link and a level badge; an account with no Dachi yet shows
+ * its platform, its handle and its XP, and deliberately has neither. The empty case is one
+ * sentence instead of a table with no rows, which a screen reader would announce as an
+ * empty grid and nothing else.
  */
 function LadderBody({ ladder }: { ladder: LadderData }) {
-  return (
-    <>
-      <section aria-labelledby="linked-heading">
-        <h2 id="linked-heading">Fan accounts</h2>
-        {ladder.linked.length === 0 ? (
-          <p className="muted">
-            Nobody has joined the ladder yet. Sign in, earn some XP and this is where your
-            name will show up.
-          </p>
-        ) : (
-          <table className="ladder-table">
-            <caption>Fan accounts with the most XP to spend first</caption>
-            <thead>
-              <tr>
-                <th scope="col">Rank</th>
-                <th scope="col">Fan</th>
-                <th scope="col">Level</th>
-                <th scope="col">XP to spend</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ladder.linked.map((fan, index) => (
-                <tr key={fan.fanId}>
-                  <td>{index + 1}</td>
-                  <td>
-                    <Link to={`/f/${encodeURIComponent(fan.handle)}`}>{fan.handle}</Link>
-                  </td>
-                  <td>
-                    <LevelBadge level={fan.level} />
-                  </td>
-                  <td>{formatNumber(fan.balance)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+  const rows = mergeLadder(ladder)
 
-      <section aria-labelledby="free-standing-heading">
-        <h2 id="free-standing-heading">Free-standing accounts</h2>
-        <p>
-          These provider accounts have earned XP, but nobody has attached them to a fan
-          account yet.
-        </p>
-        {ladder.freeStanding.length === 0 ? (
-          <p className="muted">No free-standing account has earned XP so far.</p>
-        ) : (
-          <ul className="free-list">
-            {ladder.freeStanding.map((account) => (
-              <li key={account.identityId}>
-                <span className="provider">{providerLabel(account.provider)}</span>
-                <span className="handle">@{account.displayHandle}</span>
-                <span className="xp">{formatNumber(account.xp)}</span>{' '}
-                <span className="unit">XP</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </>
+  if (rows.length === 0) {
+    return (
+      <p className="muted">
+        Personne n’a encore gagné d’XP. Connecte-toi, gagne de l’XP et ton nom apparaîtra
+        ici.
+      </p>
+    )
+  }
+
+  return (
+    <table className="ladder-table">
+      <caption>Classement par XP</caption>
+      <thead>
+        <tr>
+          <th scope="col">Rang</th>
+          <th scope="col">Dachi</th>
+          <th scope="col">Niveau</th>
+          <th scope="col">XP</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, index) => (
+          <tr key={row.key}>
+            <td>{index + 1}</td>
+            <td>
+              {row.kind === 'dachi' ? (
+                <Link to={`/f/${encodeURIComponent(row.handle)}`}>{row.handle}</Link>
+              ) : (
+                <>
+                  <span className="provider">{providerLabel(row.provider)}</span>{' '}
+                  <span className="handle">@{row.displayHandle}</span>
+                </>
+              )}
+            </td>
+            <td>{row.kind === 'dachi' ? <LevelBadge level={row.level} /> : null}</td>
+            <td>{formatNumber(row.xp)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }
 
 /**
- * The ladder: who has the most XP to spend, and who earned XP without joining.
+ * The ladder: every account that has earned XP, ranked by XP.
  *
  * Both lists come from one request, because the api answers them from one snapshot:
- * asking twice could show a fan in neither list or in both while an award lands between
+ * asking twice could show a Dachi in neither list or in both while an award lands between
  * the calls.
  */
 export function Ladder() {
@@ -86,23 +131,25 @@ export function Ladder() {
 
   return (
     <main className="page">
-      <h1>Ladder</h1>
+      <h1>Classement</h1>
       <p>
-        The ladder ranks fan accounts by the XP they can spend right now. Levels are kept
-        even when XP is spent, so a fan keeps the level they reached.
+        Le classement réunit les Dachis et les comptes non rattachés, triés par XP. Le
+        niveau est conservé même quand l’XP baisse : un Dachi garde le niveau atteint.
       </p>
 
-      {resource.state === 'loading' && <p className="muted">Loading the ladder…</p>}
+      {resource.state === 'loading' && (
+        <p className="muted">Chargement du classement…</p>
+      )}
 
       {resource.state === 'error' && (
         <section className="panel panel-error" aria-labelledby="ladder-error-heading">
-          <h2 id="ladder-error-heading">The ladder could not be loaded</h2>
+          <h2 id="ladder-error-heading">Le classement n’a pas pu être chargé</h2>
           <p>
-            Nothing is lost. The server did not answer, so this page has nothing to show
-            yet.
+            Rien n’est perdu. Le serveur n’a pas répondu, cette page n’a donc rien à
+            afficher pour l’instant.
           </p>
           <button type="button" onClick={reload}>
-            Try again
+            Réessayer
           </button>
         </section>
       )}
