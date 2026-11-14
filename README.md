@@ -40,7 +40,12 @@ numbers can be tuned against real behaviour.
 
 ## Run it locally
 
+Two stacks, both in containers, both building from this working tree. Pick the one that matches
+what you are doing.
+
 Requires Docker with Compose. No Node installation is needed.
+
+### Like production (one command, no reload)
 
 ```bash
 docker compose up --build
@@ -58,10 +63,46 @@ Then open <http://localhost:8080>.
 The web container proxies `/api` and `/auth` to the API, which is why the session cookie stays
 first-party: one origin, no CORS.
 
-### Developing without containers
+### Development stack (live reload, debuggers, debug logs)
 
-For fast iteration on the code, let Compose own the database and the migrations, and run the
-Node processes locally:
+```bash
+pnpm install                          # once, on the host: the containers mount this tree
+docker compose -f compose.dev.yaml up --build
+```
+
+Then open <http://localhost:5173>.
+
+- **No restarts.** The repository is mounted into every container. `tsx watch` reloads the API
+  and the worker on save; Vite reloads the browser. A change to a React page, a route or the
+  ledger is visible immediately.
+- **Debug logging.** `LOG_LEVEL=debug` is set for the API, so request and error detail appears in
+  `docker compose -f compose.dev.yaml logs -f api`.
+- **Debuggers.** The API listens on `localhost:9229` and the worker on `localhost:9230`
+  (`NODE_OPTIONS=--inspect`). Attach with your editor's Node debugger.
+- **Same shape as production.** Postgres, a migration run, then the API, the worker and Vite.
+  The browser still sees one origin because Vite proxies `/api` and `/auth`.
+- **If HMR does not reconnect** on a bind-mounted filesystem (some Docker Desktop setups), set
+  `CHOKIDAR_USEPOLLING=1` in your shell before `up`.
+
+`pnpm install` on the host is a prerequisite, not a duplicate: the containers use that dependency
+tree through the mount, which is what keeps the editor and the container looking at the same
+files.
+
+### Validate before pushing
+
+```bash
+bash scripts/check.sh        # or: pnpm check:docker
+```
+
+This runs the same checks the branch protection requires, in containers: typecheck, lint, the
+suite with coverage against a throwaway Postgres, then `helm lint` and the chart render
+assertions. It tears the stack down afterwards. If it is green here, `verify` and `helm` should
+be green on the pull request.
+
+### Running the Node processes without containers
+
+For a shell you fully control, start the database through Compose and run the processes on the
+host:
 
 ```bash
 docker compose up -d db
@@ -73,13 +114,10 @@ export PUBLIC_BASE_URL=http://localhost:5173
 export ALLOW_DEV_LOGIN=true
 export COOKIE_SECURE=false
 
-pnpm --filter @ashuworld/api dev      # :3000
-pnpm --filter @ashuworld/web dev      # :5173, proxies /api and /auth to :3000
-pnpm --filter @ashuworld/worker build  # the worker has no watch mode yet
+pnpm --filter @ashuworld/api dev       # :3000, tsx watch
+pnpm --filter @ashuworld/web dev       # :5173, proxies /api and /auth to :3000
+pnpm --filter @ashuworld/worker dev    # :9230 inspector, watches too
 ```
-
-Vite proxies `/api` and `/auth` to `http://localhost:3000` in dev, so the browser still sees one
-origin and the session cookie stays first-party.
 
 ## Tests
 
