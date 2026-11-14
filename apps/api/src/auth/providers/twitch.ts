@@ -5,7 +5,7 @@ import {
   type ExchangeInput,
   type ExchangeResult,
   type OAuthProvider,
-} from '../providers.js'
+} from './types.js'
 
 const AUTHORIZE_URL = 'https://id.twitch.tv/oauth2/authorize'
 const TOKEN_URL = 'https://id.twitch.tv/oauth2/token'

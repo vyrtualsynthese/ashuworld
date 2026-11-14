@@ -1,65 +1,9 @@
-import { isProviderName, type IdentityProfile, type ProviderName } from '@ashuworld/providers'
+import { isProviderName, type ProviderName } from '@ashuworld/providers'
 import type { Env } from '../config.js'
+import { createTwitchProvider } from './providers/twitch.js'
+import { ProviderExchangeError, type OAuthProvider } from './providers/types.js'
 
-/**
- * A sign-in provider: somewhere a fan can prove they control an account.
- *
- * The interface is deliberately two calls. `authorizeUrl` is where the fan is sent to
- * prove it; `exchange` is called once, on the callback, with the code that came back.
- * Nothing else may vouch for an identity: a request naming an external id proves nothing.
- */
-export interface AuthorizeInput {
-  state: string
-  redirectUri: string
-  /**
-   * A hint for providers that let the caller pre-fill the account. The dev provider uses
-   * it as the fake account to sign in as; real providers may ignore it. It is data for
-   * the provider, never a credential.
-   */
-  loginHint?: string | undefined
-}
-
-export interface ExchangeInput {
-  code: string
-  redirectUri: string
-}
-
-/**
- * What a completed exchange proved.
- *
- * The profile is the identity itself. `verifiedActions` names the one-time proofs the
- * grant carried — Twitch's follow among them — and is empty for a provider that proves
- * nothing beyond the identity, such as the dev provider.
- */
-export interface ExchangeResult {
-  profile: IdentityProfile
-  /** One-time actions this grant verified, e.g. ['twitch.follow']. */
-  verifiedActions: string[]
-  /** A grant to keep for later re-checks. Twitch's fan grant is not kept in this plan. */
-  refreshToken?: string
-}
-
-export interface OAuthProvider {
-  name: ProviderName
-  authorizeUrl(input: AuthorizeInput): string
-  exchange(input: ExchangeInput): Promise<ExchangeResult>
-}
-
-/**
- * The provider refused the code it was handed.
- *
- * A typed error so the callback can answer with a 4xx/5xx of its own instead of the
- * shared handler's 500, and can do it without creating a session or touching the ledger.
- */
-export class ProviderExchangeError extends Error {
-  readonly httpStatus: number
-
-  constructor(message: string, httpStatus = 502) {
-    super(message)
-    this.name = 'ProviderExchangeError'
-    this.httpStatus = httpStatus
-  }
-}
+export * from './providers/types.js'
 
 /** The fake account the dev door signs in as when the start request names none. */
 export const DEV_DEFAULT_HANDLE = 'ashu'
@@ -114,15 +58,45 @@ export interface ProviderRegistry {
 }
 
 /**
+ * The environment the registry reads. A `Pick` rather than the whole `Env` so a test can
+ * build a registry from three strings without inventing a database URL.
+ */
+export type ProviderEnv = Pick<
+  Env,
+  'ALLOW_DEV_LOGIN' | 'TWITCH_CLIENT_ID' | 'TWITCH_CLIENT_SECRET' | 'TWITCH_CHANNEL_LOGIN'
+>
+
+/**
  * Builds the configured providers.
  *
- * Twitch, YouTube and Discord need OAuth applications and secrets, so they are not
- * registered yet: a login attempt answers `unknown_provider` rather than pretending to
- * work. The dev provider is the only one that can be switched on from the environment.
+ * A provider is registered only when this deployment holds everything it needs: the dev
+ * door behind `ALLOW_DEV_LOGIN`, Twitch behind its client pair and the channel the follow
+ * is checked against. A name that is not registered answers `unknown_provider` rather than
+ * pretending to work — the alternative is a fan who signs in and earns nothing, with no
+ * hint why.
+ *
+ * `loadEnv` has already refused a half-set pair, so the checks here are about presence,
+ * not about diagnosing a typo.
  */
-export function createProviderRegistry(env: Pick<Env, 'ALLOW_DEV_LOGIN'>): ProviderRegistry {
+export function createProviderRegistry(env: ProviderEnv): ProviderRegistry {
   const providers = new Map<ProviderName, OAuthProvider>()
   if (env.ALLOW_DEV_LOGIN) providers.set('dev', createDevProvider())
+
+  const { TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET, TWITCH_CHANNEL_LOGIN } = env
+  if (
+    TWITCH_CLIENT_ID !== undefined &&
+    TWITCH_CLIENT_SECRET !== undefined &&
+    TWITCH_CHANNEL_LOGIN !== undefined
+  ) {
+    providers.set(
+      'twitch',
+      createTwitchProvider({
+        clientId: TWITCH_CLIENT_ID,
+        clientSecret: TWITCH_CLIENT_SECRET,
+        channelLogin: TWITCH_CHANNEL_LOGIN,
+      }),
+    )
+  }
 
   return {
     get(name: string): OAuthProvider | undefined {

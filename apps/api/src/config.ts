@@ -45,6 +45,16 @@ export interface Env {
    * sets it to `debug` to see the request and error detail.
    */
   LOG_LEVEL?: LogLevel
+  /**
+   * The Twitch OAuth application, and the channel a fan's follow is checked against.
+   *
+   * All three are optional together: absent means the Twitch door is off, and a login
+   * attempt answers `unknown_provider`. Half a pair, or a pair without the channel, is a
+   * startup error instead of a door that signs fans in and verifies nothing.
+   */
+  TWITCH_CLIENT_ID?: string
+  TWITCH_CLIENT_SECRET?: string
+  TWITCH_CHANNEL_LOGIN?: string
 }
 
 /** The levels pino accepts. Kept explicit so a typo fails at startup, not silently at run time. */
@@ -125,6 +135,42 @@ function logLevel(raw: NodeJS.ProcessEnv): LogLevel {
 }
 
 /**
+ * A credential pair read together: an id and its secret.
+ *
+ * Neither set means the provider is off, and both values are reported as `undefined`.
+ * One set is a startup error naming the missing half, because a provider that starts
+ * half-configured fails later, per fan, in the middle of a sign-in. A blank value counts
+ * as absent, the same as everywhere else in this file.
+ *
+ * The messages name variables only, never the value that was set: one half of a pair is a
+ * credential, and a startup error must not be the way it reaches a log store.
+ */
+function pairOrOff(
+  raw: NodeJS.ProcessEnv,
+  idName: string,
+  secretName: string,
+): { id: string; secret: string } | undefined {
+  const id = raw[idName]
+  const secret = raw[secretName]
+  const hasId = id !== undefined && id.trim() !== ''
+  const hasSecret = secret !== undefined && secret.trim() !== ''
+
+  if (!hasId && !hasSecret) return undefined
+  if (!hasId) {
+    throw new Error(
+      `${secretName} is set but ${idName} is not; set both to turn this provider on, or neither to leave it off`,
+    )
+  }
+  if (!hasSecret) {
+    throw new Error(
+      `${idName} is set but ${secretName} is not; ` +
+        'set both to turn this provider on, or neither to leave it off',
+    )
+  }
+  return { id: (id as string).trim(), secret: (secret as string).trim() }
+}
+
+/**
  * Reads the environment. Takes `raw` so a test can prove the defaults without mutating
  * the process it runs in; the default argument is what `src/index.ts` uses.
  *
@@ -138,6 +184,18 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
   const publicBaseUrl = required(raw, 'PUBLIC_BASE_URL')
   const erasurePepper = required(raw, 'ERASURE_PEPPER')
   const sessionCookieName = raw['SESSION_COOKIE_NAME']
+
+  // Twitch comes as a pair plus the channel it verifies against. The pair alone would let
+  // a fan sign in and earn nothing, which is the failure the channel check exists for.
+  const twitch = pairOrOff(raw, 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET')
+  const twitchConfig =
+    twitch === undefined
+      ? {}
+      : {
+          TWITCH_CLIENT_ID: twitch.id,
+          TWITCH_CLIENT_SECRET: twitch.secret,
+          TWITCH_CHANNEL_LOGIN: required(raw, 'TWITCH_CHANNEL_LOGIN'),
+        }
 
   return {
     DATABASE_URL: databaseUrl,
@@ -169,5 +227,6 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
       DEFAULT_RATE_LIMIT_WRITE_MAX,
     ),
     LOG_LEVEL: logLevel(raw),
+    ...twitchConfig,
   }
 }
