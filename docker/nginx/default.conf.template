@@ -16,6 +16,16 @@ server {
   root /usr/share/nginx/html;
   index index.html;
 
+  # HSTS belongs to the whole origin, api included, so it sits here for the proxied prefixes
+  # and the `return 404` block. Browsers ignore it over plain HTTP, which is what keeps the
+  # local stack usable.
+  #
+  # The rest of the set lives in security-headers.conf, and nginx does not pass a server
+  # level `add_header` down to a location that declares one of its own: every location
+  # below that sets a header must `include` the snippet, or its response loses the whole
+  # set. That is why the include appears three times, and why the snippet repeats HSTS.
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
   # Never proxy to an upstream that a caller can influence, and keep the Host the client
   # asked for: the api derives link and callback URLs from it.
   proxy_http_version 1.1;
@@ -56,11 +66,13 @@ server {
     try_files $uri =404;
     expires 1y;
     add_header Cache-Control "public, immutable";
+    include /etc/nginx/security-headers.conf;
   }
 
   # The document itself is never cached: a deploy must be visible on the next request.
   location = /index.html {
     add_header Cache-Control "no-store";
+    include /etc/nginx/security-headers.conf;
   }
 
   # The client-side routes. React Router owns /, /ladder, /f/<handle> and /account, and a
@@ -68,5 +80,6 @@ server {
   # only matches what the prefixes above did not.
   location / {
     try_files $uri /index.html;
+    include /etc/nginx/security-headers.conf;
   }
 }

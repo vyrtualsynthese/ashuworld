@@ -52,6 +52,9 @@ FROM nginx:1.29-alpine AS runtime
 # which is also what makes the read-only root filesystem work.
 COPY docker/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY docker/nginx/default.conf.template /etc/nginx/templates/default.conf.template
+# The header set the SPA locations include. It is a separate file because a location that
+# sets its own `add_header` does not inherit the server level ones.
+COPY docker/nginx/security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
 
 # The entrypoint's envsubst step reads the template directory and writes here. /tmp is the

@@ -221,3 +221,29 @@ jobs:
           cat /tmp/health.json
           grep -q '"ok":true' /tmp/health.json
           docker rm -f api
+
+      # The pages are served by nginx, not by the api, so its header set has its own check.
+      # The four greps are the contract: a missing include in a location block drops the
+      # whole snippet there, and only a real response shows that.
+      - name: The web image sends the security headers
+        run: |
+          docker run -d --name web -p 8080:8080 "$IMAGE_PREFIX/web:$GITHUB_SHA"
+          for _ in $(seq 1 30); do
+            if curl -fsS -I http://127.0.0.1:8080/ > /tmp/web-headers.txt; then break; fi
+            sleep 1
+          done
+          cat /tmp/web-headers.txt
+          grep -qi 'content-security-policy:.*default-src' /tmp/web-headers.txt
+          grep -qi 'strict-transport-security:' /tmp/web-headers.txt
+          grep -qi 'x-content-type-options: nosniff' /tmp/web-headers.txt
+          grep -qi 'referrer-policy:' /tmp/web-headers.txt
+          # The hashed assets live in their own location block with its own include, and
+          # their names change every build, so the URL is read from the served document.
+          curl -fsS http://127.0.0.1:8080/ > /tmp/web-index.html
+          asset="$(grep -o '/assets/[^"]*\.js' /tmp/web-index.html | head -1)"
+          test -n "$asset"
+          curl -fsS -I "http://127.0.0.1:8080$asset" > /tmp/web-asset-headers.txt
+          cat /tmp/web-asset-headers.txt
+          grep -qi 'x-content-type-options: nosniff' /tmp/web-asset-headers.txt
+          grep -qi 'content-security-policy:.*default-src' /tmp/web-asset-headers.txt
+          docker rm -f web
