@@ -1,6 +1,13 @@
 import type { Pool } from 'pg'
-import type { Queryable } from '@ashuworld/ledger'
-import type { ProviderName } from '@ashuworld/providers'
+import type { GameConfig } from '@ashuworld/gameconfig'
+import {
+  awardMonthly,
+  awardOnce,
+  ensureIdentity,
+  monthKey,
+  type Queryable,
+} from '@ashuworld/ledger'
+import { parseDiscoveryPayload, type ProviderName } from '@ashuworld/providers'
 
 /**
  * How one provider event is applied.
@@ -78,4 +85,88 @@ export async function reportUnroutedProviders(
         `the oldest is #${row.oldest_id}. They are not claimed, so their attempts stay at 0.`,
     )
   }
+}
+
+/**
+ * The discovery processor: one event about one person pays the actions it lists.
+ *
+ * Each action pays its one-time amount and the current month's credit. Both go through
+ * the ledger's conflict-based guards, so a redelivered event, a connector that runs every
+ * fifteen minutes and two workers racing the same payload all leave exactly one row per
+ * action and month. That also means the processor needs no "have I seen this" state of
+ * its own.
+ *
+ * A detached identity is skipped after its handle is refreshed. Someone who signed in,
+ * unlinked and kept being followed is not a customer of the ladder any more: paying them
+ * would build a balance nobody can spend and, worse, would resurrect it if they ever
+ * linked again. `first_linked_at` is what distinguishes them from a person seen for the
+ * first time — the link and detach rules own that column; this processor only reads it.
+ *
+ * An action the game config does not define throws, naming the key. The queue then keeps
+ * the event unprocessed with its attempt counted, so a config typo is visible in the log
+ * and retried after a deploy instead of paying nothing silently. The throw also rolls
+ * back the identity upsert, keeping the failure all-or-nothing.
+ *
+ * `now` is injected so the month a test asserts on does not depend on the wall clock.
+ */
+export function createDiscoveryProcessor(
+  cfg: GameConfig,
+  now: () => Date = () => new Date(),
+): Processor {
+  return async (tx, raw) => {
+    const payload = parseDiscoveryPayload(raw)
+    const { id: identityId } = await ensureIdentity(tx, {
+      provider: payload.provider,
+      externalId: payload.externalId,
+      displayHandle: payload.displayHandle,
+      displayName: payload.displayName,
+    })
+
+    const { rows } = await tx.query<{ fan_id: string | null; first_linked_at: Date | null }>(
+      `select fan_id, first_linked_at from provider_identities where id = $1`,
+      [identityId],
+    )
+    const identity = rows[0]
+    if (identity === undefined) throw new Error(`discovery: identity ${identityId} vanished`)
+    if (identity.fan_id === null && identity.first_linked_at !== null) return
+
+    for (const actionKey of payload.actions) {
+      const action = cfg.actions[actionKey]
+      if (action === undefined) {
+        throw new Error(`discovery: game config has no action "${actionKey}"`)
+      }
+      await awardOnce(tx, {
+        identityId,
+        provider: payload.provider,
+        actionKey,
+        amount: action.amount,
+        idempotencyKey: `discovery:${payload.provider}:${payload.externalId}:${actionKey}`,
+        cfg,
+      })
+      await awardMonthly(tx, {
+        identityId,
+        provider: payload.provider,
+        baseActionKey: actionKey,
+        month: monthKey(now()),
+        cfg,
+      })
+    }
+  }
+}
+
+/**
+ * The processors the worker registers, keyed by provider.
+ *
+ * Twitch and Discord share one discovery processor because the payload, not the platform,
+ * says which actions to pay; only the connector that finds the person differs. YouTube is
+ * deliberately absent: the game config prices `youtube.subscribe`, but no connector
+ * reports YouTube people yet, so its events stay unclaimed rather than burning attempts
+ * on an action nobody can satisfy.
+ */
+export function createProcessors(cfg: GameConfig): ProcessorMap {
+  const discovery = createDiscoveryProcessor(cfg)
+  return new Map<ProviderName, Processor>([
+    ['twitch', discovery],
+    ['discord', discovery],
+  ])
 }
