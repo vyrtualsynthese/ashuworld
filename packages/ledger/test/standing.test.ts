@@ -6,6 +6,7 @@ import {
   computeBalance,
   ensureIdentity,
   getStanding,
+  recomputeLevels,
   recomputeStanding,
   withTransaction,
   type Queryable,
@@ -26,6 +27,22 @@ const cfg: GameConfig = {
     { level: 1, minXp: 100 },
     { level: 2, minXp: 300 },
     { level: 3, minXp: 700 },
+  ],
+}
+
+/**
+ * The same game with lower thresholds, i.e. a table that puts a given peak at a higher
+ * level. This is what a versioned `game.json` change looks like to a fan who never acts
+ * again: the peak is unchanged, the level it justifies is not.
+ */
+const raisedCfg: GameConfig = {
+  ...cfg,
+  version: 'test-raised',
+  levels: [
+    { level: 0, minXp: 0 },
+    { level: 1, minXp: 50 },
+    { level: 2, minXp: 200 },
+    { level: 3, minXp: 500 },
   ],
 }
 
@@ -169,6 +186,19 @@ describe('standing', () => {
       [fanId],
     )
     return first(rows)
+  }
+
+  /**
+   * Puts a fan's record where an older table (or an operator) left it. `recomputeLevels`
+   * is about stored state versus the current table, so the tests write the state directly
+   * rather than replaying awards.
+   */
+  async function setStanding(fanId: string, peakXp: number, level: number): Promise<void> {
+    await db.pool.query('update fans set peak_xp = $2, level = $3 where id = $1', [
+      fanId,
+      peakXp,
+      level,
+    ])
   }
 
   describe('computeBalance', () => {
@@ -448,6 +478,65 @@ describe('standing', () => {
       // one, and the level stays at 3.
       expect(await slow).toEqual({ balance: 500, peakXp: 700, level: 3 })
       expect(await stored(fanId)).toEqual({ peak_xp: 700, level: 3 })
+    })
+  })
+
+  describe('recomputeLevels', () => {
+    it('raises a level when a table that puts the stored peak higher is applied', async () => {
+      // Stored level 1 is what the old table said about a peak of 300. The new table puts
+      // 300 at level 2, and the fan has not acted, so nothing else would ever move it.
+      const fanId = await seedFan()
+      await setStanding(fanId, 300, 1)
+
+      expect(await recomputeLevels(db.pool, raisedCfg)).toEqual({ raised: 1, scanned: 1 })
+      expect(await stored(fanId)).toEqual({ peak_xp: 300, level: 2 })
+    })
+
+    it('never lowers a level when the applied table shrinks', async () => {
+      // The base table puts 300 at level 2; the stored 3 came from an older, higher table.
+      // A level only ever rises, so the pass must leave the row alone.
+      const fanId = await seedFan()
+      await setStanding(fanId, 300, 3)
+
+      expect(await recomputeLevels(db.pool, cfg)).toEqual({ raised: 0, scanned: 1 })
+      expect(await stored(fanId)).toEqual({ peak_xp: 300, level: 3 })
+    })
+
+    it('raises nothing on a second run over the same table', async () => {
+      // The pass is idempotent because it only writes rows the table puts higher; the
+      // second run finds the level already there.
+      const fanId = await seedFan()
+      await setStanding(fanId, 300, 1)
+
+      expect(await recomputeLevels(db.pool, raisedCfg)).toEqual({ raised: 1, scanned: 1 })
+      expect(await recomputeLevels(db.pool, raisedCfg)).toEqual({ raised: 0, scanned: 1 })
+      expect(await stored(fanId)).toEqual({ peak_xp: 300, level: 2 })
+    })
+
+    it('leaves a fan below the new table\'s first threshold untouched', async () => {
+      // Peak 40 is below the raised table's level 1 at 50. Being scanned is not being
+      // raised: the row must come out of the pass exactly as it went in.
+      const fanId = await seedFan()
+      await setStanding(fanId, 40, 0)
+
+      expect(await recomputeLevels(db.pool, raisedCfg)).toEqual({ raised: 0, scanned: 1 })
+      expect(await stored(fanId)).toEqual({ peak_xp: 40, level: 0 })
+    })
+
+    it('counts every fan in scanned, whether it was raised or not', async () => {
+      // `scanned` is the operator's evidence that the pass saw the whole table: one fan
+      // is behind, one is already right, one is below the first threshold.
+      const behind = await seedFan('ashu')
+      const current = await seedFan('other')
+      const below = await seedFan('new_fan')
+      await setStanding(behind, 300, 1)
+      await setStanding(current, 300, 2)
+      await setStanding(below, 40, 0)
+
+      expect(await recomputeLevels(db.pool, raisedCfg)).toEqual({ raised: 1, scanned: 3 })
+      expect(await stored(behind)).toEqual({ peak_xp: 300, level: 2 })
+      expect(await stored(current)).toEqual({ peak_xp: 300, level: 2 })
+      expect(await stored(below)).toEqual({ peak_xp: 40, level: 0 })
     })
   })
 

@@ -51,6 +51,13 @@ RUN groupadd --system --gid 10001 ashuworld \
 COPY --chown=10001:10001 docker/runtime-package.json /app/package.json
 COPY --from=build --chown=10001:10001 /out/worker.js /app/dist/worker.js
 
+# The `recompute-levels` subcommand resolves game.json the same way the api does:
+# `new URL('../../../packages/gameconfig/config/game.json', import.meta.url)`. From
+# /app/dist/worker.js that is /packages/gameconfig/config/game.json. Without this copy the
+# Job fails at runtime with "cannot read the game config", after the pod has started.
+COPY --from=build --chown=10001:10001 \
+     /repo/packages/gameconfig/config/game.json /packages/gameconfig/config/game.json
+
 USER 10001:10001
 
 # No EXPOSE: the process opens no socket.

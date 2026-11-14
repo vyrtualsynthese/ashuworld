@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs'
 import type { FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
-import { loadGameConfig, type GameConfig } from '@ashuworld/gameconfig'
+import type { GameConfig } from '@ashuworld/gameconfig'
 import type { Env } from './config.js'
 import { buildServer } from './server.js'
 
@@ -19,39 +18,6 @@ export interface RunningApi {
   app: FastifyInstance
   /** Closes the app and then the pool. Calling it again does nothing. */
   stop(): Promise<void>
-}
-
-function reason(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-/**
- * Reads and validates `game.json`, naming the file in every failure.
- *
- * The file is deployment input, so a missing or broken one is an operator problem that
- * deserves a message pointing at the path, not a bare `ENOENT` or a JSON position from
- * somewhere inside Node.
- */
-export function loadGameConfigFromFile(path: string): GameConfig {
-  let text: string
-  try {
-    text = readFileSync(path, 'utf8')
-  } catch (error) {
-    throw new Error(`cannot read the game config at ${path}: ${reason(error)}`)
-  }
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text) as unknown
-  } catch (error) {
-    throw new Error(`the game config at ${path} is not valid JSON: ${reason(error)}`)
-  }
-
-  try {
-    return loadGameConfig(parsed)
-  } catch (error) {
-    throw new Error(`the game config at ${path} is invalid: ${reason(error)}`)
-  }
 }
 
 /**

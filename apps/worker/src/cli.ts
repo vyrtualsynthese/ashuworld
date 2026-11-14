@@ -1,10 +1,22 @@
+import { fileURLToPath } from 'node:url'
 import type { Pool } from 'pg'
-import { ALPHA_RESET_CONFIRM_ENV, resetAlpha } from '@ashuworld/ledger'
+import { loadGameConfigFile } from '@ashuworld/gameconfig'
+import { ALPHA_RESET_CONFIRM_ENV, recomputeLevels, resetAlpha } from '@ashuworld/ledger'
 import { runLoop } from './loop.js'
 import type { ProcessorMap } from './processors.js'
 
 /** The game config version the reset records, and every other process in the chart reads. */
 export const CONFIG_VERSION_ENV = 'GAME_CONFIG_VERSION'
+
+/**
+ * The same file the api reads, resolved from this module rather than from an environment
+ * variable, so both bundles find `/packages/gameconfig/config/game.json` in the image.
+ * From `apps/worker/src/cli.ts` the three levels climb to the repository root; from the
+ * bundled `/app/dist/worker.js` they reach `/`, which is where both Dockerfiles place it.
+ */
+const GAME_CONFIG_PATH = fileURLToPath(
+  new URL('../../../packages/gameconfig/config/game.json', import.meta.url),
+)
 
 export interface CliDeps {
   /** The database the command talks to. The shell owns creating and closing it. */
@@ -49,7 +61,11 @@ function loadConfigVersion(): string {
  *
  * - no argument: drain the queue, i.e. normal worker duty;
  * - `reset`: the one deliberate alpha wipe, guarded by `ALPHA_RESET_CONFIRM`;
- * - anything else, including extra arguments after `reset`: a refusal with a non-zero
+ * - `recompute-levels`: re-read every fan's peak through the current level table and
+ *   raise whatever the table now puts higher. It reads `GAME_CONFIG_VERSION` from the
+ *   file it loads (the api's file), not from the environment, because the pass needs the
+ *   thresholds themselves and the version is only what it reports;
+ * - anything else, including extra arguments after a command: a refusal with a non-zero
  *   exit code. There is deliberately no `--force`: a destructive command should not have
  *   a flag that removes its own guard.
  *
@@ -74,10 +90,34 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
     }
   }
 
+  if (argv[0] === 'recompute-levels') {
+    if (argv.length > 1) {
+      err(
+        `[worker] "recompute-levels" takes no arguments, but got ` +
+          `${JSON.stringify(argv.slice(1))}; it reads the level table from the game config alone`,
+      )
+      return 1
+    }
+
+    try {
+      const cfg = loadGameConfigFile(GAME_CONFIG_PATH)
+      const counts = await recomputeLevels(deps.pool, cfg)
+      out(
+        `[worker] level recompute complete: scanned ${counts.scanned} fans, ` +
+          `raised ${counts.raised} levels; game config ${cfg.version}`,
+      )
+      return 0
+    } catch (error) {
+      err(`[worker] the level recompute did not run: ${messageOf(error)}`)
+      return 1
+    }
+  }
+
   if (argv[0] !== 'reset') {
     err(
       `[worker] unknown argument "${argv[0]}"; run the worker with no argument to drain ` +
-        'the queue, or with "reset" to wipe all xp for alpha',
+        'the queue, with "reset" to wipe all xp for alpha, or with "recompute-levels" ' +
+        'to apply the current level table',
     )
     return 1
   }

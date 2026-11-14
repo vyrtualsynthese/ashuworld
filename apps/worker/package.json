@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@ashuworld/gameconfig": "workspace:*",
     "@ashuworld/ledger": "workspace:*",
     "@ashuworld/providers": "workspace:*",
     "pg": "^8.23.1"
