@@ -138,13 +138,16 @@ describe('ladder', () => {
 
       expect(await ladder()).toEqual({
         linked: [
-          { fanId: bob, handle: 'bob', level: 1, balance: 150 },
-          { fanId: amy, handle: 'amy', level: 0, balance: 50 },
-          { fanId: ashu, handle: 'ashu', level: 2, balance: 50 },
-          { fanId: zoe, handle: 'zoe', level: 0, balance: 50 },
+          { handle: 'bob', level: 1, balance: 150 },
+          { handle: 'amy', level: 0, balance: 50 },
+          { handle: 'ashu', level: 2, balance: 50 },
+          { handle: 'zoe', level: 0, balance: 50 },
         ],
         freeStanding: [],
       })
+
+      // A public row carries no database id: the handle is what a reader can follow.
+      expect((await ladder()).linked[0]).not.toHaveProperty('fanId')
 
       // The peak is still the record it was: the ladder simply does not rank by it.
       expect(await withTransaction(db.pool, (tx) => getStanding(tx, ashu))).toEqual({
@@ -182,7 +185,7 @@ describe('ladder', () => {
 
       // The fresh 25 is live, so only `first_linked_at` keeps this row off the list.
       expect(await ladder()).toEqual({
-        linked: [{ fanId, handle: 'ashu', level: 0, balance: 0 }],
+        linked: [{ handle: 'ashu', level: 0, balance: 0 }],
         freeStanding: [
           {
             identityId: neverLinked,
@@ -220,20 +223,27 @@ describe('ladder', () => {
       // 100 kept from youtube, minus the 25 penalty; the detached twitch earns are gone.
       expect(await ladder()).toEqual({
         linked: [
-          { fanId: ashu, handle: 'ashu', level: 1, balance: 75 },
-          { fanId: bob, handle: 'bob', level: 0, balance: 50 },
+          { handle: 'ashu', level: 1, balance: 75 },
+          { handle: 'bob', level: 0, balance: 50 },
         ],
         freeStanding: [],
       })
 
       const { linked } = await ladder()
+      // The row no longer carries the id, so the comparison joins on the public handle.
+      const fanIds = new Map([
+        ['ashu', ashu],
+        ['bob', bob],
+      ])
       const fromComputeBalance: Array<[string, number]> = []
       await withTransaction(db.pool, async (tx) => {
         for (const row of linked) {
-          fromComputeBalance.push([row.fanId, await computeBalance(tx, row.fanId)])
+          const fanId = fanIds.get(row.handle)
+          if (fanId === undefined) throw new Error(`unexpected handle ${row.handle}`)
+          fromComputeBalance.push([row.handle, await computeBalance(tx, fanId)])
         }
       })
-      expect(linked.map((row) => [row.fanId, row.balance])).toEqual(fromComputeBalance)
+      expect(linked.map((row) => [row.handle, row.balance])).toEqual(fromComputeBalance)
     })
 
     it('keeps a fan who forfeited everything on the ladder, at the bottom', async () => {
@@ -258,10 +268,10 @@ describe('ladder', () => {
 
       expect(await ladder()).toEqual({
         linked: [
-          { fanId: bob, handle: 'bob', level: 1, balance: 100 },
+          { handle: 'bob', level: 1, balance: 100 },
           // Zero balance, level 1 kept from the peak, ordered by handle after bob.
-          { fanId: ashu, handle: 'ashu', level: 1, balance: 0 },
-          { fanId: cleo, handle: 'cleo', level: 0, balance: 0 },
+          { handle: 'ashu', level: 1, balance: 0 },
+          { handle: 'cleo', level: 0, balance: 0 },
         ],
         // The forfeited identity was once linked, so neither its zero nor its old earns
         // can bring it back to the free-standing list.

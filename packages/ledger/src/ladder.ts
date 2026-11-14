@@ -4,7 +4,6 @@ import { getStanding, liveBalancesQuery } from './standing.js'
 
 /** One account on the public ladder, ranked by what it can spend today. */
 export interface LadderRow {
-  fanId: string
   handle: string
   level: number
   balance: number
@@ -17,6 +16,7 @@ export interface LadderRow {
  * row instead of silently disappearing from the ladder until a login claims them.
  */
 export interface FreeStandingRow {
+  // The only stable key a never-linked account has, and not the provider's external id.
   identityId: string
   provider: ProviderName
   displayHandle: string
@@ -51,7 +51,6 @@ export interface Ladder {
 const FREE_STANDING = 'i.fan_id is null and i.first_linked_at is null'
 
 interface LinkedRow {
-  fan_id: string
   handle: string
   level: number
   balance: number
@@ -93,7 +92,7 @@ interface FreeRow {
  */
 export async function listLadder(tx: Queryable): Promise<Ladder> {
   const linked = await tx.query<LinkedRow>(
-    `select f.id as fan_id, f.handle, f.level, coalesce(live.balance, 0) as balance
+    `select f.handle, f.level, coalesce(live.balance, 0) as balance
        from fans f
        left join (${liveBalancesQuery()}) live on live.fan_id = f.id
       order by coalesce(live.balance, 0) desc, f.handle asc`,
@@ -114,7 +113,6 @@ export async function listLadder(tx: Queryable): Promise<Ladder> {
 
   return {
     linked: linked.rows.map((row) => ({
-      fanId: row.fan_id,
       handle: row.handle,
       level: row.level,
       balance: row.balance,

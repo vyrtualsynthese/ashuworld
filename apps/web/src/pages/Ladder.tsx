@@ -43,7 +43,7 @@ function mergeLadder(ladder: LadderData): LadderRow[] {
   const rows: LadderRow[] = [
     ...ladder.linked.map((fan) => ({
       kind: 'dachi' as const,
-      key: fan.fanId,
+      key: fan.handle,
       name: fan.handle,
       handle: fan.handle,
       level: fan.level,

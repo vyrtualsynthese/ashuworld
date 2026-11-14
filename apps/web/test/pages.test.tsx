@@ -60,7 +60,7 @@ describe('Ladder', () => {
   it('puts a Dachi and a free-standing account in one table in XP order', async () => {
     stubFetch(() =>
       jsonResponse({
-        linked: [{ fanId: 'fan-1', handle: 'ashu', level: 1, balance: 100 }],
+        linked: [{ handle: 'ashu', level: 1, balance: 100 }],
         freeStanding: [
           { identityId: 'identity-1', provider: 'twitch', displayHandle: 'sofa_sam', xp: 250 },
         ],
@@ -84,9 +84,9 @@ describe('Ladder', () => {
     stubFetch(() =>
       jsonResponse({
         linked: [
-          { fanId: 'fan-1', handle: 'zoe', level: 1, balance: 50 },
+          { handle: 'zoe', level: 1, balance: 50 },
           // Under a code-unit sort `zoe` comes before `émile`; the page must compare names.
-          { fanId: 'fan-2', handle: 'émile', level: 1, balance: 50 },
+          { handle: 'émile', level: 1, balance: 50 },
         ],
         freeStanding: [],
       }),
@@ -104,9 +104,9 @@ describe('Ladder', () => {
     stubFetch(() =>
       jsonResponse({
         linked: [
-          { fanId: 'fan-1', handle: 'ashu', level: 2, balance: 320 },
-          { fanId: 'fan-2', handle: 'bo', level: 1, balance: 120 },
-          { fanId: 'fan-3', handle: 'carol', level: 4, balance: 10 },
+          { handle: 'ashu', level: 2, balance: 320 },
+          { handle: 'bo', level: 1, balance: 120 },
+          { handle: 'carol', level: 4, balance: 10 },
         ],
         freeStanding: [],
       }),
