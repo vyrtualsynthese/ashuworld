@@ -568,6 +568,7 @@ git add packages/ledger && git commit -m "✨ feat: balance, peak and level neve
 - Produces: `createFan(tx: Queryable, input: { handle: string; displayName: string }): Promise<{ id: string }>`.
 - Produces: `linkIdentity(tx: Queryable, input: { fanId: string; identityId: string; cfg: GameConfig }): Promise<LinkResult>` where `type LinkResult = { ok: true } | { ok: false; reason: 'already_owned' | 'same_provider' }`.
 - Produces: `detachIdentity(tx: Queryable, input: { fanId: string; identityId: string; cfg: GameConfig }): Promise<DetachResult>` where `type DetachResult = { ok: true; forfeitedEntries: number } | { ok: false; reason: 'not_attached' | 'last_identity' }`.
+- Both functions require a transaction, and the requirement is enforced, not documented: each begins with `savepoint ledger_tx_required` / `release savepoint ledger_tx_required`. On a bare pool that pair fails immediately with "SAVEPOINT can only be used in transaction blocks"; without it, `detachIdentity` would take and release its fan lock inside one statement and two concurrent detaches could leave a fan with zero identities, which is the one state the rule forbids.
 
 - [ ] **Step 1: Write the failing tests**
 
