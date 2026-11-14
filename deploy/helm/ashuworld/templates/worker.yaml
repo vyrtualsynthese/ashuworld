@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ashuworld.fullname" . }}-worker
+  labels:
+    {{- include "ashuworld.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  revisionHistoryLimit: 5
+  # One process per replica and a claim that never hands the same event to two of them:
+  # scaling out is safe, and `for update skip locked` is what makes it so.
+  selector:
+    matchLabels:
+      {{- include "ashuworld.selectorLabels" (dict "root" . "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ashuworld.selectorLabels" (dict "root" . "component" "worker") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: {{ include "ashuworld.image" (dict "root" . "component" "worker") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.hooks.enabled }}
+          # The port a provider adapter will bind. It is declared only when the ingress
+          # routes to the worker, which stays off until that adapter exists.
+          ports:
+            - name: http
+              containerPort: {{ .Values.worker.hooksPort }}
+              protocol: TCP
+          {{- end }}
+          env:
+            {{- include "ashuworld.databaseUrlEnv" . | nindent 12 }}
+            # The worker does not serve HTTP yet, but any future adapter that logs a client
+            # address must find the same trust decision as the api rather than invent one.
+            - name: TRUST_PROXY
+              value: "true"
+            - name: GAME_CONFIG_VERSION
+              value: {{ required "game.configVersion is required" .Values.game.configVersion | quote }}
+            {{- range $name, $value := .Values.worker.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+          # No probes: the process opens no socket. A probe here would have nothing to
+          # connect to and would restart a healthy worker every few seconds.
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      # The loop finishes the event in flight on SIGTERM, then closes the pool.
+      terminationGracePeriodSeconds: 60
+{{- if .Values.hooks.enabled }}
+---
+# Only rendered when the ingress routes to the worker. Without this Service the ingress
+# backend would name an object that does not exist, and the path would answer 503.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ashuworld.fullname" . }}-worker
+  labels:
+    {{- include "ashuworld.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ashuworld.selectorLabels" (dict "root" . "component" "worker") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.worker.hooksPort }}
+      targetPort: http
+      protocol: TCP
+{{- end }}

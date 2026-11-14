@@ -1,0 +1,144 @@
+# Default values for the AshuWorld chart.
+#
+# Postgres is not part of this chart. The cluster already has one, and the chart only reads
+# its connection URL from a Secret that the operator creates; there is no value here that
+# could put a connection string into `helm get manifest`.
+#
+# One hostname, path-routed: `/` to web, `/api` and `/auth` to api. The single origin is a
+# hard requirement, because the session cookie is HttpOnly and every call the pages make is
+# an absolute /api or /auth path.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Shared by every image unless its component overrides it. CI publishes `latest` from develop
+# and the commit SHA from every build; a real deployment sets this to that SHA, so a pod
+# restart cannot change which commit it runs.
+image:
+  tag: latest
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+api:
+  image:
+    # Replace with the repository CI publishes to, e.g. ghcr.io/<owner>/<repo>/api.
+    repository: ghcr.io/your-org/ashuworld/api
+    # Empty means "the shared image.tag", and then the chart's appVersion.
+    tag: ""
+  replicaCount: 1
+  port: 3000
+  # Extra environment, rendered after the values the chart fixes itself. Useful for
+  # ALLOW_DEV_LOGIN, SESSION_COOKIE_NAME and COOKIE_SECURE. DATABASE_URL, PORT,
+  # PUBLIC_BASE_URL, TRUST_PROXY and GAME_CONFIG_VERSION are set by the chart and cannot be
+  # overridden here.
+  env:
+    # The dev sign-in door is a separate switch from the web build flag, because the api
+    # decides whether /auth/dev/start exists and the web bundle decides whether to show the
+    # button. Turning this on is the only way to sign in until a real provider lands.
+    ALLOW_DEV_LOGIN: "false"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+web:
+  image:
+    repository: ghcr.io/your-org/ashuworld/web
+    tag: ""
+  replicaCount: 1
+  # nginx listens on an unprivileged port, so the image runs as uid 101 with no capabilities.
+  port: 8080
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+worker:
+  image:
+    repository: ghcr.io/your-org/ashuworld/worker
+    tag: ""
+  replicaCount: 1
+  # The port a provider adapter will bind. It is only declared, and the worker's Service is
+  # only created, when hooks.enabled is true; the worker itself binds nothing today.
+  hooksPort: 3001
+  # Extra environment, rendered after the fixed ones. The worker has no HTTP port and no
+  # probes; it is ready when it is running.
+  env: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+migrate:
+  # The Job that runs before install and upgrade. It uses the api image, which is the one
+  # that carries dist/migrate.js and the .sql files.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+postgres:
+  # The name of an existing Secret in the release namespace. This chart never creates it and
+  # never renders its contents: the connection URL is an external fact that must not appear
+  # in a manifest, a shell history or a values file in the repository.
+  secretName: ashuworld-postgres
+  # The key in that Secret whose value is the full `postgres://user:pass@host/db` URL.
+  urlKey: url
+
+game:
+  # Must match "version" in packages/gameconfig/config/game.json. The api and worker receive
+  # it as GAME_CONFIG_VERSION, and the alpha reset stamps it on the audit row.
+  configVersion: "2026-11-14.1"
+
+ingress:
+  enabled: true
+  # The cluster's ingress class. Empty leaves the choice to a default class, which is the
+  # right default for a single-class cluster.
+  className: ""
+  # Replace per environment. The chart refuses to render an empty host: inventing one would
+  # produce a certificate and a callback URL that nobody registered.
+  host: ashuworld.example.com
+  # The scheme the browser uses. PUBLIC_BASE_URL is built from it, and the session cookie's
+  # Secure flag follows PUBLIC_BASE_URL when COOKIE_SECURE is not set explicitly.
+  scheme: https
+  annotations: {}
+  tls:
+    enabled: true
+    # Empty means "<release>-ashuworld-tls", for cert-manager or a pre-made certificate.
+    secretName: ""
+
+hooks:
+  # The worker binds no HTTP port until a real provider adapter exists, so the /hooks path
+  # must not be routed. Turning this on without an adapter installs an ingress path that
+  # fails every request: leave it false until the Twitch plan lands.
+  enabled: false
+
+alphaReset:
+  # The destructive Job renders only when this is true. Its command is wired by the alpha
+  # reset task; until then, enabling it runs a Job that exits non-zero.
+  enabled: false
+  # Create the confirm Secret from the value below. Set to false and fill secretName to use
+  # one the operator created instead.
+  createSecret: true
+  confirm: reset-ashuworld
+  secretName: ""
+  # The key that holds the confirm value in the Secret.
+  secretKey: confirm
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# The web bundle compiles VITE_DEV_LOGIN at build time (Vite replaces import.meta.env), so
+# it is not a chart value: flipping it means rebuilding and republishing the web image with
+# `--build-arg VITE_DEV_LOGIN=true`. The api's ALLOW_DEV_LOGIN is the matching switch above.
