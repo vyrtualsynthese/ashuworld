@@ -1,0 +1,15 @@
+{
+  "version": "2026-11-14.1",
+  "actions": {
+    "twitch.follow": { "amount": 50, "provider": "twitch" },
+    "youtube.subscribe": { "amount": 50, "provider": "youtube" },
+    "discord.member": { "amount": 75, "provider": "discord" }
+  },
+  "levels": [
+    { "level": 0, "minXp": 0 },
+    { "level": 1, "minXp": 100 },
+    { "level": 2, "minXp": 300 },
+    { "level": 3, "minXp": 700 },
+    { "level": 4, "minXp": 1500 }
+  ]
+}
