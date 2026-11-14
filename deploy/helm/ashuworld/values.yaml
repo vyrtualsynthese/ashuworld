@@ -96,7 +96,7 @@ postgres:
 game:
   # Must match "version" in packages/gameconfig/config/game.json. The api and worker receive
   # it as GAME_CONFIG_VERSION, and the alpha reset Job logs it with the counts it deleted.
-  configVersion: "2026-11-14.1"
+  configVersion: "2026-11-14.2"
 
 ingress:
   enabled: true

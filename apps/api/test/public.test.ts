@@ -28,6 +28,7 @@ const cfg: GameConfig = {
     { level: 1, minXp: 100 },
     { level: 2, minXp: 300 },
   ],
+  beyond: { step: 1600, factor: 2 },
 }
 
 const COOKIE = 'ashuworld_session'
@@ -270,6 +271,14 @@ describe('GET /api/public/game', () => {
           { level: 0, minXp: 0 },
           { level: 1, minXp: 100 },
           { level: 2, minXp: 300 },
+          { level: 3, minXp: 1900 },
+          { level: 4, minXp: 5100 },
+          { level: 5, minXp: 11500 },
+          { level: 6, minXp: 24300 },
+          { level: 7, minXp: 49900 },
+          { level: 8, minXp: 101100 },
+          { level: 9, minXp: 203500 },
+          { level: 10, minXp: 408300 },
         ],
       })
       expect(res.headers['set-cookie']).toBeUndefined()
@@ -320,6 +329,7 @@ describe('GET /api/public/game', () => {
         { level: 0, minXp: 0 },
         { level: 1, minXp: 42 },
       ],
+      beyond: { step: 1600, factor: 2 },
     }
 
     const app = buildServer({ pool: db.pool, cfg: conniving, env: testEnv() })
@@ -351,6 +361,15 @@ describe('GET /api/public/game', () => {
         levels: [
           { level: 0, minXp: 0 },
           { level: 1, minXp: 42 },
+          { level: 2, minXp: 1642 },
+          { level: 3, minXp: 4842 },
+          { level: 4, minXp: 11242 },
+          { level: 5, minXp: 24042 },
+          { level: 6, minXp: 49642 },
+          { level: 7, minXp: 100842 },
+          { level: 8, minXp: 203242 },
+          { level: 9, minXp: 408042 },
+          { level: 10, minXp: 817642 },
         ],
       })
     } finally {

@@ -193,7 +193,7 @@ describe('runCli', () => {
     expect(printed).toContain('scanned 2 fans')
     expect(printed).toContain('raised 1 levels')
     // The version comes from the file's "version" field, not from the environment.
-    expect(printed).toContain('2026-11-14.1')
+    expect(printed).toContain('2026-11-14.2')
 
     const { rows } = await db.pool.query<{ handle: string; level: number }>(
       'select handle, level from fans order by handle',

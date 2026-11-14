@@ -1,5 +1,5 @@
 {
-  "version": "2026-11-14.1",
+  "version": "2026-11-14.2",
   "actions": {
     "twitch.follow": {
       "amount": 50,
@@ -29,5 +29,6 @@
     { "level": 2, "minXp": 300 },
     { "level": 3, "minXp": 700 },
     { "level": 4, "minXp": 1500 }
-  ]
+  ],
+  "beyond": { "step": 1600, "factor": 2 }
 }

@@ -135,6 +135,9 @@ function Rules({ game }: { game: PublicGameData }) {
         <h2 id="xp-levels-heading">Les niveaux</h2>
         <LevelsTable levels={game.levels} />
         <p className="muted">
+          Les niveaux n'ont pas de maximum : chaque niveau demande plus d'XP que le précédent.
+        </p>
+        <p className="muted">
           Le niveau est conservé même quand l'XP baisse : un Dachi garde le niveau atteint.
         </p>
       </section>

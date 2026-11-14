@@ -41,6 +41,7 @@ const cfg: GameConfig = {
     { level: 1, minXp: 100 },
     { level: 2, minXp: 300 },
   ],
+  beyond: { step: 1600, factor: 2 },
 }
 
 const COOKIE = 'ashuworld_session'
