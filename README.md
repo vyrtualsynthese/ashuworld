@@ -81,6 +81,11 @@ Then open <http://localhost:5173>.
 - **No restarts.** The repository is mounted into every container. `tsx watch` reloads the API
   and the worker on save; Vite reloads the browser. A change to a React page, a route or the
   ledger is visible immediately.
+- **The watchers poll the mounted tree** (`CHOKIDAR_USEPOLLING`, `VITE_USE_POLLING`). `git pull`
+  and `git rebase` replace watched files rather than editing them, and a native file watcher can
+  miss that replacement and keep serving the previous build. Polling costs a little CPU and
+  removes that class of "it did not pick up my change". If a change still does not appear,
+  `docker compose -f compose.dev.yaml restart api worker` is the fast way back.
 - **Debug logging.** `LOG_LEVEL=debug` is set for the API, so request and error detail appears in
   `docker compose -f compose.dev.yaml logs -f api`.
 - **Debuggers.** The API listens on `localhost:9229` and the worker on `localhost:9230`

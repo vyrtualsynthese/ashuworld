@@ -23,6 +23,11 @@ export default defineConfig({
       '/api': process.env['API_PROXY_TARGET'] ?? 'http://localhost:3000',
       '/auth': process.env['API_PROXY_TARGET'] ?? 'http://localhost:3000',
     },
+    // Polling in the container stack. `git pull` and `git rebase` replace watched files, and
+    // the native watcher can miss the replacement: the page then keeps the previous bundle
+    // until the container is restarted. Polling costs a little CPU and removes that class of
+    // "it did not pick up my change".
+    watch: { usePolling: process.env['VITE_USE_POLLING'] === '1' },
   },
   test: {
     name: '@ashuworld/web',
