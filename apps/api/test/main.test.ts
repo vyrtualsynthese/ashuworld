@@ -162,7 +162,14 @@ describe('loadGameConfigFile', () => {
       path,
       JSON.stringify({
         version: '2026-11-14.1',
-        actions: { 'twitch.follow': { amount: 50, provider: 'twitch' } },
+        actions: {
+          'twitch.follow': {
+            amount: 50,
+            provider: 'twitch',
+            label: 'Suivre la chaîne sur Twitch',
+            description: 'Une seule fois, par compte Twitch rattaché.',
+          },
+        },
         levels: [
           { level: 0, minXp: 0 },
           { level: 1, minXp: 100 },

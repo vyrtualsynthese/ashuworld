@@ -187,7 +187,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   })
 
   registerHealthRoutes(app, pool)
-  registerPublicRoutes(app, { pool })
+  registerPublicRoutes(app, { pool, cfg })
   registerMeRoutes(app, { pool, env })
   registerIdentityRoutes(app, { pool, cfg, env })
   registerAuthRoutes(app, {

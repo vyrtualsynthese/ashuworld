@@ -257,6 +257,13 @@ a:focus-visible {
   font-weight: 600;
 }
 
+/* The description sits under its action name, in the same cell, so the table stays one
+ * row per action instead of growing a second line of columns for a sentence. */
+.action-description {
+  display: block;
+  font-size: 0.9rem;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   button,
   .button {

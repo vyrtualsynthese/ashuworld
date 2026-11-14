@@ -11,9 +11,10 @@ import { Home } from './pages/Home'
 import { Ladder } from './pages/Ladder'
 import { NotFound } from './pages/NotFound'
 import { Profile } from './pages/Profile'
+import { Xp } from './pages/Xp'
 
 /**
- * The frame around every page: the project's name, the three places a visitor can go, and
+ * The frame around every page: the project's name, the four places a visitor can go, and
  * whatever the route renders.
  *
  * Each page owns its own `<main>` and its own heading, so the frame cannot nest a second
@@ -30,6 +31,7 @@ function Layout() {
         </Link>
         <nav aria-label="Navigation principale">
           <NavLink to="/ladder">Classement</NavLink>
+          <NavLink to="/xp">Gagner de l'XP</NavLink>
           <NavLink to="/account">Mon compte</NavLink>
         </nav>
       </header>
@@ -81,6 +83,7 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <Home /> },
       { path: 'ladder', element: <Ladder /> },
+      { path: 'xp', element: <Xp /> },
       { path: 'f/:handle', element: <Profile /> },
       { path: 'account', element: <Account /> },
       { path: '*', element: <NotFound /> },

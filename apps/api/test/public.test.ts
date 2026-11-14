@@ -232,6 +232,148 @@ describe('GET /api/public/ladder', () => {
   })
 })
 
+describe('GET /api/public/game', () => {
+  it('serves the actions and levels to a request with no cookie and no session', async () => {
+    await withApp(async (app) => {
+      const res = await app.inject({ method: 'GET', url: '/api/public/game' })
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({
+        // Highest amount first: youtube 100, discord 75, twitch 50.
+        actions: [
+          {
+            key: 'youtube.subscribe',
+            provider: 'youtube',
+            amount: 100,
+            label: 'youtube.subscribe',
+            description: '',
+          },
+          {
+            key: 'discord.member',
+            provider: 'discord',
+            amount: 75,
+            label: 'discord.member',
+            description: '',
+          },
+          {
+            key: 'twitch.follow',
+            provider: 'twitch',
+            amount: 50,
+            label: 'twitch.follow',
+            description: '',
+          },
+        ],
+        levels: [
+          { level: 0, minXp: 0 },
+          { level: 1, minXp: 100 },
+          { level: 2, minXp: 300 },
+        ],
+      })
+      expect(res.headers['set-cookie']).toBeUndefined()
+      expect(res.headers['cache-control']).toBe('public, max-age=15')
+    })
+  })
+
+  it('answers the same rules whether or not the request carries a session', async () => {
+    const fanId = await seedFan('ashu', 'Ashu')
+    const sessionId = await withTransaction(db.pool, (tx) => createSession(tx, fanId))
+
+    await withApp(async (app) => {
+      const anonymous = await app.inject({ method: 'GET', url: '/api/public/game' })
+      const signedIn = await app.inject({
+        method: 'GET',
+        url: '/api/public/game',
+        headers: { cookie: `${COOKIE}=${sessionId}` },
+      })
+
+      expect(signedIn.statusCode).toBe(200)
+      // The session is ignored, not honoured: same bytes, no refreshed or new cookie.
+      expect(signedIn.body).toBe(anonymous.body)
+      expect(signedIn.headers['set-cookie']).toBeUndefined()
+      expect(signedIn.headers['cache-control']).toBe(anonymous.headers['cache-control'])
+    })
+  })
+
+  it('takes every value from the config the server was built with', async () => {
+    const conniving: GameConfig = {
+      version: 'never-public',
+      actions: {
+        'zeta.follow': {
+          amount: 999,
+          provider: 'twitch',
+          label: 'Suivre Zeta',
+          description: 'Une seule fois.',
+        },
+        'alpha.member': {
+          amount: 999,
+          provider: 'discord',
+          label: 'Rejoindre Alpha',
+          description: 'Une seule fois aussi.',
+        },
+      },
+      levels: [
+        { level: 0, minXp: 0 },
+        { level: 1, minXp: 42 },
+      ],
+    }
+
+    const app = buildServer({ pool: db.pool, cfg: conniving, env: testEnv() })
+    app.log.level = 'silent'
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/public/game' })
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({
+        // The tie at 999 is broken by key, not by insertion order.
+        actions: [
+          {
+            key: 'alpha.member',
+            provider: 'discord',
+            amount: 999,
+            label: 'Rejoindre Alpha',
+            description: 'Une seule fois aussi.',
+          },
+          {
+            key: 'zeta.follow',
+            provider: 'twitch',
+            amount: 999,
+            label: 'Suivre Zeta',
+            description: 'Une seule fois.',
+          },
+        ],
+        levels: [
+          { level: 0, minXp: 0 },
+          { level: 1, minXp: 42 },
+        ],
+      })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('exposes nothing from the config beyond the five rule fields', async () => {
+    await withApp(async (app) => {
+      const res = await app.inject({ method: 'GET', url: '/api/public/game' })
+      const body = res.json() as Record<string, unknown>
+
+      // The config also carries a version; it must not travel with the rules.
+      expect(Object.keys(body).sort()).toEqual(['actions', 'levels'])
+      for (const action of body['actions'] as Array<Record<string, unknown>>) {
+        expect(Object.keys(action).sort()).toEqual([
+          'amount',
+          'description',
+          'key',
+          'label',
+          'provider',
+        ])
+      }
+      for (const level of body['levels'] as Array<Record<string, unknown>>) {
+        expect(Object.keys(level).sort()).toEqual(['level', 'minXp'])
+      }
+    })
+  })
+})
+
 describe('GET /api/public/fans/:handle', () => {
   it('serves a public profile without a session, case-insensitively', async () => {
     const fanId = await seedFan('ashu', 'Ashu')
