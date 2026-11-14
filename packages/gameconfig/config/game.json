@@ -1,9 +1,24 @@
 {
   "version": "2026-11-14.1",
   "actions": {
-    "twitch.follow": { "amount": 50, "provider": "twitch" },
-    "youtube.subscribe": { "amount": 50, "provider": "youtube" },
-    "discord.member": { "amount": 75, "provider": "discord" }
+    "twitch.follow": {
+      "amount": 50,
+      "provider": "twitch",
+      "label": "Suivre la chaîne sur Twitch",
+      "description": "Une seule fois, par compte Twitch rattaché."
+    },
+    "youtube.subscribe": {
+      "amount": 50,
+      "provider": "youtube",
+      "label": "S'abonner à la chaîne sur YouTube",
+      "description": "Une seule fois, par compte YouTube rattaché."
+    },
+    "discord.member": {
+      "amount": 75,
+      "provider": "discord",
+      "label": "Rejoindre le serveur Discord",
+      "description": "Une seule fois, par compte Discord rattaché."
+    }
   },
   "levels": [
     { "level": 0, "minXp": 0 },

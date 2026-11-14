@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { RouterProvider, createMemoryRouter, type RouteObject } from 'react-router-dom'
 import { render, screen, within } from '@testing-library/react'
 import { routes } from '../src/App'
-import { FAN, LADDER, ME, jsonResponse, stubFetch } from './helpers'
+import { FAN, GAME, LADDER, ME, jsonResponse, stubFetch } from './helpers'
 
 function renderAt(path: string): void {
   const router = createMemoryRouter(routes, { initialEntries: [path] })
@@ -10,7 +10,7 @@ function renderAt(path: string): void {
 }
 
 describe('the route table', () => {
-  it('serves the home page at the root, with a way to the ladder', async () => {
+  it('serves the home page at the root, with the three places to go', async () => {
     renderAt('/')
 
     expect(await screen.findByRole('heading', { name: 'AshuWorld' })).toBeInTheDocument()
@@ -19,14 +19,36 @@ describe('the route table', () => {
       '/ladder',
     )
     const nav = screen.getByRole('navigation', { name: /navigation principale/i })
+    // The three links are in a fixed order, so the nav reads the same on every page.
+    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'Classement',
+      "Gagner de l'XP",
+      'Mon compte',
+    ])
     expect(within(nav).getByRole('link', { name: /classement/i })).toHaveAttribute(
       'href',
       '/ladder',
+    )
+    expect(within(nav).getByRole('link', { name: /gagner de l'xp/i })).toHaveAttribute(
+      'href',
+      '/xp',
     )
     expect(within(nav).getByRole('link', { name: /mon compte/i })).toHaveAttribute(
       'href',
       '/account',
     )
+  })
+
+  it('serves the xp page at /xp', async () => {
+    stubFetch(() => jsonResponse(GAME))
+
+    renderAt('/xp')
+
+    expect(
+      await screen.findByRole('heading', { name: "Gagner de l'XP", level: 1 }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Les actions' })).toBeInTheDocument()
+    expect(screen.getByText(GAME.actions[0]!.label)).toBeInTheDocument()
   })
 
   it('serves the ladder at /ladder', async () => {

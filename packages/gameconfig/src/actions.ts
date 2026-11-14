@@ -8,6 +8,24 @@ export type ActionKey = string
 export interface ActionDef {
   readonly amount: number
   readonly provider: ProviderName
+  /**
+   * The player-facing name of the action, in the site's language.
+   *
+   * It lives in the config rather than in the page so the words and the amount ship
+   * together: a page that read one from `game.json` and the other from code could
+   * describe an action the ledger does not pay.
+   */
+  readonly label?: string
+  /** One sentence explaining the action, in the same language as `label`. */
+  readonly description?: string
+}
+
+/** A required, non-empty, trimmed string field, or a ConfigError naming the action and field. */
+function requiredText(key: string, field: string, value: unknown): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new ConfigError(`action "${key}" must have a non-empty ${field}, got ${label(value)}`)
+  }
+  return value.trim()
 }
 
 /**
@@ -41,7 +59,9 @@ export function parseActions(entries: Iterable<readonly [string, unknown]>): Rec
     if (typeof provider !== 'string' || !isProviderName(provider)) {
       throw new ConfigError(`action "${key}" must name a known provider, got ${label(provider)}`)
     }
-    actions[key] = { amount, provider }
+    const labelText = requiredText(key, 'label', value['label'])
+    const descriptionText = requiredText(key, 'description', value['description'])
+    actions[key] = { amount, provider, label: labelText, description: descriptionText }
     count += 1
   }
   if (count === 0) {

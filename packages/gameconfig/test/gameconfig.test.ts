@@ -3,11 +3,23 @@ import { describe, expect, it } from 'vitest'
 import { ConfigError, actionAmount, levelForXp, loadGameConfig } from '../src/index.js'
 import { parseActions } from '../src/actions.js'
 
+const followAction = {
+  amount: 50,
+  provider: 'twitch',
+  label: 'Suivre la chaîne sur Twitch',
+  description: 'Une seule fois, par compte Twitch rattaché.',
+}
+
 const valid = (): Record<string, unknown> => ({
   version: '2026-11-14.1',
   actions: {
-    'twitch.follow': { amount: 50, provider: 'twitch' },
-    'discord.member': { amount: 75, provider: 'discord' },
+    'twitch.follow': followAction,
+    'discord.member': {
+      amount: 75,
+      provider: 'discord',
+      label: 'Rejoindre le serveur Discord',
+      description: 'Une seule fois, par compte Discord rattaché.',
+    },
   },
   levels: [
     { level: 0, minXp: 0 },
@@ -57,7 +69,7 @@ describe('game config', () => {
 
   it('rejects a non-positive amount', () => {
     expect(() =>
-      loadGameConfig({ ...valid(), actions: { 'twitch.follow': { amount: 0, provider: 'twitch' } } }),
+      loadGameConfig({ ...valid(), actions: { 'twitch.follow': { ...followAction, amount: 0 } } }),
     ).toThrow(ConfigError)
   })
 })
@@ -84,7 +96,7 @@ describe('loadGameConfig input shape', () => {
   })
 
   it('rejects a blank action key', () => {
-    expect(loadActions({ '  ': { amount: 5, provider: 'dev' } })).toBe('action keys must be non-empty')
+    expect(loadActions({ '  ': { ...followAction } })).toBe('action keys must be non-empty')
   })
 
   it('rejects an action that is not an object', () => {
@@ -94,15 +106,16 @@ describe('loadGameConfig input shape', () => {
   it('rejects an action defined twice', () => {
     // JSON cannot express this: a repeated key is collapsed by the parser before it
     // reaches the config. The validator takes entries, so the guard is testable here.
-    const follow = { amount: 50, provider: 'twitch' }
-    expect(rejection(() => parseActions([['twitch.follow', follow], ['twitch.follow', follow]]))).toBe(
+    expect(
+      rejection(() => parseActions([['twitch.follow', followAction], ['twitch.follow', followAction]])),
+    ).toBe(
       'action "twitch.follow" is defined more than once',
     )
   })
 
   it('rejects an amount that is not a positive integer', () => {
     const amount = (value: unknown): string =>
-      loadActions({ 'twitch.follow': { amount: value, provider: 'twitch' } })
+      loadActions({ 'twitch.follow': { ...followAction, amount: value } })
     expect(amount(0)).toBe('action "twitch.follow" must have a positive integer amount, got 0')
     expect(amount(-5)).toBe('action "twitch.follow" must have a positive integer amount, got -5')
     expect(amount(50.5)).toBe('action "twitch.follow" must have a positive integer amount, got 50.5')
@@ -114,14 +127,46 @@ describe('loadGameConfig input shape', () => {
 
   it('rejects a provider that is not a known platform', () => {
     const provider = (value: unknown): string =>
-      loadActions({ 'twitch.follow': { amount: 50, provider: value } })
+      loadActions({ 'twitch.follow': { ...followAction, provider: value } })
     expect(provider('myspace')).toBe('action "twitch.follow" must name a known provider, got "myspace"')
     expect(provider(42)).toBe('action "twitch.follow" must name a known provider, got 42')
   })
 
+  it('keeps the player-facing label and description next to the amount', () => {
+    const def = loadGameConfig(valid()).actions['twitch.follow']
+    expect(def?.label).toBe('Suivre la chaîne sur Twitch')
+    expect(def?.description).toBe('Une seule fois, par compte Twitch rattaché.')
+  })
+
+  it('rejects a missing, blank or non-string label', () => {
+    const label = (value: unknown): string =>
+      loadActions({ 'twitch.follow': { ...followAction, label: value } })
+    expect(label(undefined)).toBe(
+      'action "twitch.follow" must have a non-empty label, got undefined',
+    )
+    expect(label('')).toBe('action "twitch.follow" must have a non-empty label, got ""')
+    expect(label('   ')).toBe('action "twitch.follow" must have a non-empty label, got "   "')
+    expect(label(7)).toBe('action "twitch.follow" must have a non-empty label, got 7')
+  })
+
+  it('rejects a missing, blank or non-string description', () => {
+    const description = (value: unknown): string =>
+      loadActions({ 'twitch.follow': { ...followAction, description: value } })
+    expect(description(undefined)).toBe(
+      'action "twitch.follow" must have a non-empty description, got undefined',
+    )
+    expect(description('')).toBe('action "twitch.follow" must have a non-empty description, got ""')
+    expect(description('  ')).toBe(
+      'action "twitch.follow" must have a non-empty description, got "  "',
+    )
+    expect(description(null)).toBe(
+      'action "twitch.follow" must have a non-empty description, got null',
+    )
+  })
+
   it('keeps a __proto__ action key as data instead of treating it as a prototype', () => {
     const raw: unknown = JSON.parse(
-      '{"version":"v1","actions":{"__proto__":{"amount":1,"provider":"dev"}},"levels":[{"level":0,"minXp":0}]}',
+      '{"version":"v1","actions":{"__proto__":{"amount":1,"provider":"dev","label":"Ping","description":"Un ping local."}},"levels":[{"level":0,"minXp":0}]}',
     )
     expect(actionAmount(loadGameConfig(raw), '__proto__')).toBe(1)
   })
@@ -210,7 +255,14 @@ describe('actionAmount', () => {
   it('accepts the dev provider for local development', () => {
     const cfg = loadGameConfig({
       ...valid(),
-      actions: { 'dev.ping': { amount: 1, provider: 'dev' } },
+      actions: {
+        'dev.ping': {
+          amount: 1,
+          provider: 'dev',
+          label: 'Ping de développement',
+          description: 'Réservé au développement local.',
+        },
+      },
     })
     expect(actionAmount(cfg, 'dev.ping')).toBe(1)
   })
@@ -230,6 +282,27 @@ describe('shipped config/game.json', () => {
     expect(actionAmount(cfg, 'youtube.subscribe')).toBe(50)
     expect(actionAmount(cfg, 'discord.member')).toBe(75)
     expect(cfg.actions['twitch.follow']?.provider).toBe('twitch')
+  })
+
+  it('carries the French label and the one-per-account rule for every action', () => {
+    expect(cfg.actions['twitch.follow']).toEqual({
+      amount: 50,
+      provider: 'twitch',
+      label: 'Suivre la chaîne sur Twitch',
+      description: 'Une seule fois, par compte Twitch rattaché.',
+    })
+    expect(cfg.actions['youtube.subscribe']).toEqual({
+      amount: 50,
+      provider: 'youtube',
+      label: "S'abonner à la chaîne sur YouTube",
+      description: 'Une seule fois, par compte YouTube rattaché.',
+    })
+    expect(cfg.actions['discord.member']).toEqual({
+      amount: 75,
+      provider: 'discord',
+      label: 'Rejoindre le serveur Discord',
+      description: 'Une seule fois, par compte Discord rattaché.',
+    })
   })
 
   it('holds the five-row level table', () => {

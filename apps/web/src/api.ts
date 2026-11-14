@@ -66,6 +66,32 @@ export interface DetachResult {
   level: number
 }
 
+/** One action on the public rules page: what it pays and how to explain it. */
+export interface PublicAction {
+  key: string
+  provider: string
+  amount: number
+  label: string
+  description: string
+}
+
+/** One level threshold on the public rules page. */
+export interface PublicLevel {
+  level: number
+  minXp: number
+}
+
+/**
+ * What `GET /api/public/game` answers.
+ *
+ * The values come from `config/game.json` through the api, not from this bundle: the page
+ * and the ledger cannot disagree about what an action pays, because there is one copy.
+ */
+export interface PublicGame {
+  actions: PublicAction[]
+  levels: PublicLevel[]
+}
+
 /**
  * A failed call, carrying what the caller needs to branch on.
  *
@@ -194,6 +220,11 @@ export function fetchLadder(): Promise<Ladder> {
 /** One public profile. The handle comes from the URL, so it is escaped before it is a path. */
 export function fetchFan(handle: string): Promise<PublicFan> {
   return getJson<PublicFan>(`/api/public/fans/${encodeURIComponent(handle)}`)
+}
+
+/** The public game rules: every action's value and the level thresholds. */
+export function fetchPublicGame(): Promise<PublicGame> {
+  return getJson<PublicGame>('/api/public/game')
 }
 
 /** The signed-in fan, or a 401 `ApiError` when there is none. */
