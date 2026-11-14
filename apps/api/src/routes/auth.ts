@@ -13,7 +13,11 @@ import {
   type HandshakePurpose,
 } from '../auth/handshake.js'
 import { createFanWithUniqueHandle } from '../auth/handles.js'
-import { ProviderExchangeError, createProviderRegistry } from '../auth/providers.js'
+import {
+  ProviderExchangeError,
+  createProviderRegistry,
+  type ProviderRegistry,
+} from '../auth/providers.js'
 import {
   authenticatedFanId,
   createSession,
@@ -26,6 +30,12 @@ export interface AuthRouteDeps {
   pool: Pool
   cfg: GameConfig
   env: Env
+  /**
+   * The providers this deployment accepts. Production leaves it unset and the registry
+   * is built from `env`; a test supplies one to inspect what the routes hand a provider,
+   * and a real provider registry can be injected the same way.
+   */
+  providers?: ProviderRegistry
 }
 
 interface StartQuery {
@@ -229,7 +239,7 @@ async function resolveLink(
  * that do not ask for it.
  */
 export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): void {
-  const providers = createProviderRegistry(deps.env)
+  const providers = deps.providers ?? createProviderRegistry(deps.env)
   const requireSession = requireFan({ pool: deps.pool, env: deps.env })
 
   app.get<{ Params: { provider: string }; Querystring: StartQuery }>(

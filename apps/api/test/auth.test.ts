@@ -23,6 +23,11 @@ import {
   suffixedHandle,
 } from '../src/auth/handles.js'
 import { createDevProvider } from '../src/auth/providers.js'
+import type {
+  ExchangeInput,
+  OAuthProvider,
+  ProviderRegistry,
+} from '../src/auth/providers.js'
 import { createSession } from '../src/auth/session.js'
 import { OAUTH_STATE_COOKIE_NAME } from '../src/routes/auth.js'
 
@@ -70,8 +75,14 @@ beforeEach(async () => {
 async function withApp(
   run: (app: FastifyInstance) => Promise<void>,
   env: Partial<Env> = {},
+  providers?: ProviderRegistry,
 ): Promise<void> {
-  const app = buildServer({ pool: db.pool, cfg, env: testEnv(env) })
+  const app = buildServer({
+    pool: db.pool,
+    cfg,
+    env: testEnv(env),
+    ...(providers === undefined ? {} : { providers }),
+  })
   app.log.level = 'silent'
   try {
     await run(app)
@@ -337,6 +348,40 @@ describe('GET /auth/:provider/start', () => {
       expect(location.origin).toBe('http://localhost:3000')
       expect(location.href).not.toContain('evil.example')
     })
+  })
+
+  it('builds the callback exchange redirect from PUBLIC_BASE_URL, not the request Host', async () => {
+    // The start redirect is visible in its Location header; the exchange's redirect URI
+    // is not, and it is the one the provider sends the browser back to. A Host-shaped
+    // value here would let a caller aim that bounce at a host of their choosing, so the
+    // registry is wrapped to record exactly what the callback hands the provider.
+    const dev = createDevProvider()
+    const exchanges: ExchangeInput[] = []
+    const observing: OAuthProvider = {
+      name: 'dev',
+      authorizeUrl: (input) => dev.authorizeUrl(input),
+      exchange: async (input) => {
+        exchanges.push(input)
+        return dev.exchange(input)
+      },
+    }
+    const registry: ProviderRegistry = {
+      get: (name) => (name === 'dev' ? observing : undefined),
+    }
+
+    await withApp(
+      async (app) => {
+        const state = await newState(app)
+        const res = await callback(app, { state, code: 'ashu', host: 'evil.example' })
+
+        expect(res.statusCode).toBe(302)
+        expect(exchanges).toHaveLength(1)
+        expect(exchanges[0]?.redirectUri).toBe(REDIRECT_URI)
+        expect(exchanges[0]?.redirectUri).not.toContain('evil.example')
+      },
+      {},
+      registry,
+    )
   })
 
   it('carries the requested handle into the dev provider redirect', async () => {

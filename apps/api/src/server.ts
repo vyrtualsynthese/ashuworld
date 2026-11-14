@@ -1,13 +1,20 @@
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
+import type { IncomingMessage, Server, ServerResponse } from 'node:http'
+import Fastify, {
+  type FastifyError,
+  type FastifyInstance,
+  type FastifyRequest,
+} from 'fastify'
 import cookie from '@fastify/cookie'
 import type { Pool } from 'pg'
 import { ConfigError, type GameConfig } from '@ashuworld/gameconfig'
 import { AwardConflictError, HandleTakenError, PenaltyError } from '@ashuworld/ledger'
 import type { Env } from './config.js'
-import { errorBody } from './errors.js'
+import { errorBody, notFoundBody } from './errors.js'
 import { HandleExhaustedError } from './auth/handles.js'
+import type { ProviderRegistry } from './auth/providers.js'
 import { registerAuthRoutes } from './routes/auth.js'
 import { registerHealthRoutes } from './routes/health.js'
+import { registerIdentityRoutes } from './routes/identities.js'
 import { registerMeRoutes } from './routes/me.js'
 
 export interface ServerDeps {
@@ -19,6 +26,12 @@ export interface ServerDeps {
    * production leaves it unset and pino writes to standard output.
    */
   logStream?: { write(line: string): void }
+  /**
+   * Replaces the provider registry. Production builds it from the environment; tests
+   * use it to observe the arguments a route hands a provider, which are otherwise
+   * invisible. A real provider registry is injected the same way.
+   */
+  providers?: ProviderRegistry
 }
 
 /**
@@ -36,8 +49,6 @@ const CLIENT_ERRORS: Readonly<Record<number, { code: string; message: string }>>
 }
 
 const FALLBACK_CLIENT_ERROR = { code: 'client_error', message: 'the request was refused' }
-
-const NOT_FOUND_MESSAGE = 'the requested resource does not exist'
 
 /**
  * A request URL without its query string.
@@ -62,16 +73,31 @@ function pathOnly(url: string | undefined): string {
  */
 export function buildServer(deps: ServerDeps): FastifyInstance {
   const { pool, cfg, env } = deps
-  const app = Fastify({
+  // The three generics pin the instance to node's HTTP server and its request/response
+  // types. Without them, a serializer that reads `request.ip` makes TypeScript resolve
+  // the HTTP/2 overload, whose instance type no route or plugin here accepts.
+  const app = Fastify<Server, IncomingMessage, ServerResponse>({
     logger: {
       level: 'info',
       // Fastify logs `req` for every request and again for the response; without this
       // serializer the callback's query string, and with it the code and state, would be
       // written twice per sign-in.
+      //
+      // The address fields are pino's own names (`remoteAddress`, `remotePort`), so a
+      // log pipeline that already understands Fastify's default line keeps working.
+      // They stay because abuse triage needs to know who sent a request; only the query
+      // string is withheld.
       serializers: {
-        req: (request: { method: string; url?: string }) => ({
+        req: (request: FastifyRequest) => ({
           method: request.method,
           url: pathOnly(request.url),
+          remoteAddress: request.ip,
+          // Omitted rather than logged as null when the socket has no port (the test
+          // harness's fake socket, for one): `remotePort?: number` under
+          // `exactOptionalPropertyTypes` accepts a number or no key, not `undefined`.
+          ...(request.socket.remotePort === undefined
+            ? {}
+            : { remotePort: request.socket.remotePort }),
         }),
       },
       ...(deps.logStream === undefined ? {} : { stream: deps.logStream }),
@@ -146,12 +172,23 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.setNotFoundHandler((request, reply) => {
     // The request details go to the log, never into the response: a URL can carry a
     // token or a probe path, and a 404 is the easiest place to leak one by accident.
-    request.log.info({ method: request.method, url: request.url }, 'no route matches the request')
-    return reply.code(404).send(errorBody('not_found', NOT_FOUND_MESSAGE))
+    // The query is dropped from the log line too: a mistyped callback path puts a live
+    // authorization `code` and `state` there, and those are credentials.
+    request.log.info(
+      { method: request.method, url: pathOnly(request.url) },
+      'no route matches the request',
+    )
+    return reply.code(404).send(notFoundBody())
   })
 
   registerHealthRoutes(app, pool)
   registerMeRoutes(app, { pool, env })
-  registerAuthRoutes(app, { pool, cfg, env })
+  registerIdentityRoutes(app, { pool, cfg, env })
+  registerAuthRoutes(app, {
+    pool,
+    cfg,
+    env,
+    ...(deps.providers === undefined ? {} : { providers: deps.providers }),
+  })
   return app
 }
