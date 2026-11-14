@@ -47,7 +47,7 @@ async function probeDatabase(pool: Pool): Promise<void> {
  * `{ error: { code, message } }` shape as every other error.
  */
 export function registerHealthRoutes(app: FastifyInstance, pool: Pool): void {
-  app.get('/api/health', async (_request, reply) => {
+  app.get('/api/health', { config: { rateLimit: false } }, async (_request, reply) => {
     try {
       await withDeadline(probeDatabase(pool), HEALTH_DEADLINE_MS)
     } catch (error) {

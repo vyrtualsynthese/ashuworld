@@ -34,7 +34,7 @@ export type SessionConfig = Pick<Env, 'SESSION_COOKIE_NAME' | 'COOKIE_SECURE'>
 
 export interface AuthDeps {
   pool: Pool
-  env: SessionConfig
+  env: Env
 }
 
 /**
