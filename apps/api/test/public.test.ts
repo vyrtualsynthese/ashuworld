@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { FastifyInstance } from 'fastify'
+import type { Pool } from 'pg'
 import type { GameConfig } from '@ashuworld/gameconfig'
 import {
   awardOnce,
@@ -125,7 +126,86 @@ describe('GET /api/public/ladder', () => {
         freeStanding: [],
       })
       expect(res.headers['set-cookie']).toBeUndefined()
+      // The ladder is the same for everyone and moves at the speed of an earn, not a
+      // click, so a short public window is safe and keeps a shared link off the origin.
+      expect(res.headers['cache-control']).toBe('public, max-age=15')
     })
+  })
+
+  it('serves a never-linked earning identity as a free-standing row', async () => {
+    const fanId = await seedFan('ashu', 'Ashu')
+    const twitch = await seedIdentity('twitch', 't-ashu', 'ashu_tv')
+    await link(fanId, twitch)
+    await award(twitch, 'twitch', 'twitch.follow', 50, 'ashu-earn')
+    // Nobody has ever claimed this one; its earn still counts, on its own row.
+    const unclaimed = await seedIdentity('youtube', 'y-unclaimed', 'unclaimed_yt')
+    await award(unclaimed, 'youtube', 'youtube.subscribe', 100, 'unclaimed-earn')
+
+    await withApp(async (app) => {
+      const res = await app.inject({ method: 'GET', url: '/api/public/ladder' })
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({
+        linked: [{ fanId, handle: 'ashu', level: 0, balance: 50 }],
+        freeStanding: [
+          {
+            identityId: unclaimed,
+            provider: 'youtube',
+            displayHandle: 'unclaimed_yt',
+            xp: 100,
+          },
+        ],
+      })
+    })
+  })
+
+  // The isolation level is issued by the route, which is exactly the kind of line a later
+  // refactor drops without any test noticing: the responses are identical either way. The
+  // pool is instrumented, so the check runs on the same client, after the route's own
+  // statement, before the transaction commits.
+  it('reads the ladder inside a repeatable-read transaction', async () => {
+    await seedFan('ashu', 'Ashu')
+
+    const seen: string[] = []
+    // A client returned to the pool is reused by later tests, and pg-pool also calls
+    // `query` callback-style, which an async replacement would swallow. Every patched
+    // client is therefore put back exactly as it was once the request is over.
+    const restores: Array<() => void> = []
+    const tracing = {
+      connect: async () => {
+        const client = await db.pool.connect()
+        const raw = client as unknown as {
+          query(text: string, values?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }>
+        }
+        const original = raw.query.bind(raw)
+        raw.query = async (text, values) => {
+          const result = await original(text, values)
+          if (/set transaction isolation level/i.test(text)) {
+            const { rows } = await original("select current_setting('transaction_isolation') as level")
+            seen.push(String(rows[0]?.['level']))
+          }
+          return result
+        }
+        restores.push(() => {
+          raw.query = original
+        })
+        return client
+      },
+    } as unknown as Pool
+
+    const app = buildServer({ pool: tracing, cfg, env: testEnv() })
+    app.log.level = 'silent'
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/public/ladder' })
+      expect(res.statusCode).toBe(200)
+    } finally {
+      await app.close()
+      for (const restore of restores) restore()
+    }
+
+    // Empty means the route never asked for repeatable read; any other value means it
+    // asked and the database said no.
+    expect(seen).toEqual(['repeatable read'])
   })
 
   it('answers the same ladder whether or not the request carries a session', async () => {
@@ -173,6 +253,30 @@ describe('GET /api/public/fans/:handle', () => {
         identities: [{ provider: 'twitch', displayHandle: 'ashu_tv' }],
       })
       expect(res.headers['set-cookie']).toBeUndefined()
+      expect(res.headers['cache-control']).toBe('public, max-age=15')
+    })
+  })
+
+  it('answers the same profile whether or not the request carries a session', async () => {
+    const fanId = await seedFan('ashu', 'Ashu')
+    const twitch = await seedIdentity('twitch', 't-ashu', 'ashu_tv')
+    await link(fanId, twitch)
+    await award(twitch, 'twitch', 'twitch.follow', 150, 'ashu-earn')
+    const sessionId = await withTransaction(db.pool, (tx) => createSession(tx, fanId))
+
+    await withApp(async (app) => {
+      const anonymous = await app.inject({ method: 'GET', url: '/api/public/fans/ashu' })
+      const signedIn = await app.inject({
+        method: 'GET',
+        url: '/api/public/fans/ashu',
+        headers: { cookie: `${COOKIE}=${sessionId}` },
+      })
+
+      expect(signedIn.statusCode).toBe(200)
+      // Same rule as the ladder: the session is ignored, not honoured, and never refreshed.
+      expect(signedIn.body).toBe(anonymous.body)
+      expect(signedIn.headers['set-cookie']).toBeUndefined()
+      expect(signedIn.headers['cache-control']).toBe(anonymous.headers['cache-control'])
     })
   })
 
@@ -195,6 +299,9 @@ describe('GET /api/public/fans/:handle', () => {
       // response cannot be used to enumerate who has an account.
       expect(unknown.body).toBe(noRoute.body)
       expect(unknown.headers['content-type']).toBe(noRoute.headers['content-type'])
+      // A 404 is heuristically cacheable. Without this, a CDN could keep answering "not
+      // found" for a handle that was registered after it cached the answer.
+      expect(unknown.headers['cache-control']).toBe('no-store')
     })
   })
 

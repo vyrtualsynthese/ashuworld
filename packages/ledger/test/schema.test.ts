@@ -71,12 +71,30 @@ describe('schema', () => {
   it('is idempotent', async () => {
     await expect(migrate(db.pool)).resolves.toBeUndefined()
     const { rows } = await db.pool.query<{ n: string }>('select count(*)::text as n from _migrations')
-    expect(rows[0]?.n).toBe('2')
+    expect(rows[0]?.n).toBe('3')
   })
 
   it('records the applied files by name', async () => {
     const { rows } = await db.pool.query<{ name: string }>('select name from _migrations order by 1')
-    expect(rows.map((r) => r.name)).toEqual(['0001_init.sql', '0002_oauth_handshakes.sql'])
+    expect(rows.map((r) => r.name)).toEqual([
+      '0001_init.sql',
+      '0002_oauth_handshakes.sql',
+      '0003_ladder_indexes.sql',
+    ])
+  })
+
+  // The ladder groups balances by owner. `identity_id` was already indexed; without this
+  // one the planner has no way into the fan side and rescans the ledger per fan.
+  it('indexes live xp_entries by fan, partially', async () => {
+    const { rows } = await db.pool.query<{ indexdef: string }>(
+      `select indexdef from pg_indexes
+        where schemaname = current_schema() and indexname = 'xp_entries_fan_live'`,
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.indexdef).toContain('(fan_id)')
+    // A full index would carry every forfeited entry forever: a detach forfeits instead
+    // of deleting, and the balance never reads a forfeited row.
+    expect(rows[0]?.indexdef).toMatch(/where \(forfeited_at is null\)/i)
   })
 
   it('refuses a handshake purpose that is neither login nor link', async () => {
@@ -198,7 +216,7 @@ describe('migration runner', () => {
       // re-check inside the lock makes it skip instead of replaying the file.
       await Promise.all([migrate(fresh.pool), migrate(fresh.pool)])
       const { rows } = await fresh.pool.query<{ n: string }>('select count(*)::text as n from _migrations')
-      expect(rows[0]?.n).toBe('2')
+      expect(rows[0]?.n).toBe('3')
       const { rows: fans } = await fresh.pool.query<{ n: string }>("select count(*)::text as n from pg_tables where schemaname = current_schema() and tablename = 'fans'")
       expect(fans[0]?.n).toBe('1')
     } finally {
@@ -216,10 +234,18 @@ describe('migration runner', () => {
     const fresh = await createTestDb({ migrate: false })
     try {
       process.chdir(elsewhere)
-      expect(migrationFiles()).toEqual(['0001_init.sql', '0002_oauth_handshakes.sql'])
+      expect(migrationFiles()).toEqual([
+        '0001_init.sql',
+        '0002_oauth_handshakes.sql',
+        '0003_ladder_indexes.sql',
+      ])
       await migrate(fresh.pool)
       const { rows } = await fresh.pool.query<{ name: string }>('select name from _migrations order by 1')
-      expect(rows.map((r) => r.name)).toEqual(['0001_init.sql', '0002_oauth_handshakes.sql'])
+      expect(rows.map((r) => r.name)).toEqual([
+        '0001_init.sql',
+        '0002_oauth_handshakes.sql',
+        '0003_ladder_indexes.sql',
+      ])
       const { rows: tables } = await fresh.pool.query<{ tablename: string }>(
         `select tablename from pg_tables where schemaname = current_schema() order by 1`,
       )
