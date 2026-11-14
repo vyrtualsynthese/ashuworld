@@ -1056,7 +1056,7 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement**
 
-The claim is `select * from inbound_events where processed_at is null order by id for update skip locked limit 1` inside `withTransaction`. The processor runs on the claimed row's payload in that same transaction: on success set `processed_at = now()` and commit; on throw roll back the processor's writes, then run a second small transaction that only does `update inbound_events set attempts = attempts + 1 where id = $1`, and return `'empty'` so the loop can pick the next row. After 5 attempts the row still stays unprocessed but is logged once per attempt with its id; there is no dead-letter table at alpha, and the operator sees it in the log.
+The claim is `select * from inbound_events where processed_at is null and attempts < 5 and provider = any($1) order by id for update skip locked limit 1` inside `withTransaction`, where `$1` is the set of providers that have a registered processor. The `attempts < 5` bound is what stops a poison event from blocking every later event of its provider forever: after five failures it drops out of the claim, stays in the table with `attempts = 5` for the operator, and the rest of that provider's queue drains. The processor runs on the claimed row's payload in that same transaction: on success set `processed_at = now()` and commit; on throw roll back the processor's writes, then run a second small transaction that does `update inbound_events set attempts = attempts + 1 where id = $1 and processed_at is null`, and return `'empty'` so the loop can pick the next row.
 
 `ingestEvent` is deliberately not involved here: it exists for first arrival, and it treats an existing `(provider, event_id)` as a duplicate without calling the handler.
 
@@ -1093,7 +1093,8 @@ git add apps/worker && git commit -m "✨ feat: worker outbox loop with skip-loc
 set -euo pipefail
 out="$(helm template ashuworld . --set ingress.host=ashuworld.test)"
 echo "$out" | grep -q 'kind: Deployment' || { echo "no Deployment"; exit 1; }
-echo "$out" | grep -q '/hooks' || { echo "worker not routed"; exit 1; }
+echo "$out" | grep -q '/hooks' && { echo "hooks path routed before any adapter exists"; exit 1; }
+test "$(helm template ashuworld . --set ingress.host=ashuworld.test --set hooks.enabled=true | grep -c '/hooks')" -eq 1 || { echo "hooks path missing when enabled"; exit 1; }
 echo "$out" | grep -q 'helm.sh/hook: pre-install,pre-upgrade' || { echo "no migrate job"; exit 1; }
 test "$(echo "$out" | grep -c 'kind: Deployment')" -eq 3 || { echo "expected 3 deployments"; exit 1; }
 test "$(echo "$out" | grep -c 'runAsNonRoot: true')" -ge 3 || { echo "containers run as root"; exit 1; }
