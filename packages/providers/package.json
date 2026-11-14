@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "vitest run",
+    "test": "vitest run --root ../.. --project @ashuworld/providers",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
