@@ -5,6 +5,7 @@ import Fastify, {
   type FastifyRequest,
 } from 'fastify'
 import cookie from '@fastify/cookie'
+import helmet from '@fastify/helmet'
 import type { Pool } from 'pg'
 import { ConfigError, type GameConfig } from '@ashuworld/gameconfig'
 import { AwardConflictError, HandleTakenError, PenaltyError } from '@ashuworld/ledger'
@@ -17,6 +18,7 @@ import { registerHealthRoutes } from './routes/health.js'
 import { registerIdentityRoutes } from './routes/identities.js'
 import { registerMeRoutes } from './routes/me.js'
 import { registerPublicRoutes } from './routes/public.js'
+import { helmetOptions } from './security/headers.js'
 
 export interface ServerDeps {
   pool: Pool
@@ -113,6 +115,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // Registering the plugin here means every route that needs `reply.setCookie` or
   // `request.cookies` shares the same parser and serializer.
   app.register(cookie)
+
+  // Every response carries the same deny-all header set, error bodies included. Registering
+  // it once here, rather than per route, is what leaves a future route no way to opt out.
+  app.register(helmet, helmetOptions())
 
   /**
    * One error shape for every failure: `{ error: { code, message } }`.
