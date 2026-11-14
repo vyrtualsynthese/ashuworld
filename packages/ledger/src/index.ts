@@ -18,6 +18,13 @@ export {
   type IngestOutcome,
 } from './award.js'
 export { ensureIdentity, type IdentityRef } from './identity.js'
+export {
+  InvalidMonthError,
+  awardMonthly,
+  monthKey,
+  type MonthlyAwardInput,
+  type MonthlyAwardResult,
+} from './monthly.js'
 export { HandleTakenError, createFan, type CreateFanInput } from './fans.js'
 export {
   detachIdentity,

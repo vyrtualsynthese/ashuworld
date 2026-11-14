@@ -3,18 +3,21 @@
   "actions": {
     "twitch.follow": {
       "amount": 50,
+      "monthly": 5,
       "provider": "twitch",
       "label": "Suivre la chaîne sur Twitch",
       "description": "Une seule fois, par compte Twitch rattaché."
     },
     "youtube.subscribe": {
       "amount": 50,
+      "monthly": 5,
       "provider": "youtube",
       "label": "S'abonner à la chaîne sur YouTube",
       "description": "Une seule fois, par compte YouTube rattaché."
     },
     "discord.member": {
       "amount": 75,
+      "monthly": 10,
       "provider": "discord",
       "label": "Rejoindre le serveur Discord",
       "description": "Une seule fois, par compte Discord rattaché."

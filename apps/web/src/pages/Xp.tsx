@@ -12,9 +12,13 @@ import { useResource } from '../useResource'
  * What every action pays, as the api serves it.
  *
  * The label is the action's name in the interface and the description says how often it
- * counts; both come from `game.json`, beside the amount they describe. That is the whole
+ * counts; both come from `game.json`, beside the amounts they describe. That is the whole
  * point of the page: changing an amount in the config changes this table, with no code
  * change and no chance of the page promising a number the ledger will not pay.
+ *
+ * `monthly` is the recurring part: the one-time bonus is in `amount`, and an action with
+ * no recurring amount shows a dash rather than a zero, which would read as "this pays
+ * nothing at all".
  */
 function ActionsTable({ actions }: { actions: PublicAction[] }) {
   return (
@@ -24,6 +28,7 @@ function ActionsTable({ actions }: { actions: PublicAction[] }) {
           <th scope="col">Action</th>
           <th scope="col">Plateforme</th>
           <th scope="col">XP</th>
+          <th scope="col">Par mois</th>
         </tr>
       </thead>
       <tbody>
@@ -35,6 +40,7 @@ function ActionsTable({ actions }: { actions: PublicAction[] }) {
             </td>
             <td>{providerLabel(action.provider)}</td>
             <td>{formatNumber(action.amount)}</td>
+            <td>{action.monthly > 0 ? formatNumber(action.monthly) : '—'}</td>
           </tr>
         ))}
       </tbody>
@@ -78,8 +84,8 @@ export function Xp() {
     <main className="page">
       <h1>Gagner de l'XP</h1>
       <p>
-        Voici tout ce qui rapporte de l'XP, et combien. Chaque action ne compte qu'une fois
-        par compte de plateforme.
+        Le bonus est versé une seule fois, puis un montant revient chaque mois tant que la
+        condition est remplie.
       </p>
       <p className="muted">
         Les connexions aux plateformes arrivent progressivement pendant l'alpha : une
@@ -119,6 +125,10 @@ function Rules({ game }: { game: PublicGameData }) {
       <section aria-labelledby="xp-actions-heading">
         <h2 id="xp-actions-heading">Les actions</h2>
         <ActionsTable actions={game.actions} />
+        <p className="muted">
+          Si tu retires ton abonnement ou quittes le serveur, les mois suivants ne sont plus
+          crédités. L'XP déjà gagnée et ton niveau restent.
+        </p>
       </section>
 
       <section aria-labelledby="xp-levels-heading">

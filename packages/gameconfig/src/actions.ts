@@ -7,6 +7,14 @@ export type ActionKey = string
 
 export interface ActionDef {
   readonly amount: number
+  /**
+   * What the action pays every month while its condition still holds, or absent.
+   *
+   * `amount` is the one-time bonus; this is the smaller recurring amount that makes a
+   * follow, subscription or membership keep being worth something. Zero is the same as
+   * absent for the ledger, but a config that names it says the decision was made.
+   */
+  readonly monthly?: number
   readonly provider: ProviderName
   /**
    * The player-facing name of the action, in the site's language.
@@ -59,9 +67,26 @@ export function parseActions(entries: Iterable<readonly [string, unknown]>): Rec
     if (typeof provider !== 'string' || !isProviderName(provider)) {
       throw new ConfigError(`action "${key}" must name a known provider, got ${label(provider)}`)
     }
+    const monthlyValue = value['monthly']
+    let monthly: number | undefined
+    if (monthlyValue !== undefined) {
+      if (
+        typeof monthlyValue !== 'number' ||
+        !Number.isInteger(monthlyValue) ||
+        monthlyValue < 0
+      ) {
+        throw new ConfigError(
+          `action "${key}" must have a non-negative integer monthly amount, got ${label(monthlyValue)}`,
+        )
+      }
+      monthly = monthlyValue
+    }
     const labelText = requiredText(key, 'label', value['label'])
     const descriptionText = requiredText(key, 'description', value['description'])
-    actions[key] = { amount, provider, label: labelText, description: descriptionText }
+    actions[key] =
+      monthly === undefined
+        ? { amount, provider, label: labelText, description: descriptionText }
+        : { amount, provider, label: labelText, description: descriptionText, monthly }
     count += 1
   }
   if (count === 0) {

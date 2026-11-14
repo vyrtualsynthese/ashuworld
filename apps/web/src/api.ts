@@ -71,6 +71,8 @@ export interface PublicAction {
   key: string
   provider: string
   amount: number
+  /** What returns every month while the condition holds; 0 when the action has none. */
+  monthly: number
   label: string
   description: string
 }
