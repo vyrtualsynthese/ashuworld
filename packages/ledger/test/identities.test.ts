@@ -336,6 +336,38 @@ describe('identities', () => {
       expect((await identityRow(identityId)).fan_id).toBe(fanId)
     })
 
+    it('refuses to run without a transaction', async () => {
+      // A bare pool autocommits each statement on whichever connection is free: the row
+      // lock would end with its statement and the update could land without its audit row
+      // or standing recompute. The savepoint pair turns that mistake into a loud failure.
+      const fanId = await seedFan()
+      const identityId = await seedIdentity()
+
+      await expect(linkIdentity(db.pool, { fanId, identityId, cfg })).rejects.toThrow(
+        /SAVEPOINT can only be used in transaction blocks/i,
+      )
+      expect((await identityRow(identityId)).fan_id).toBeNull()
+    })
+
+    it("leaves the caller's transaction usable after a same-provider refusal", async () => {
+      // A refusal must not abort the caller's transaction: Postgres silently turns a
+      // COMMIT on an aborted transaction into ROLLBACK, so the damage would show up only
+      // as work that vanished. The follow-up statement is the proof.
+      const fanId = await seedFan()
+      const firstIdentity = await seedIdentity('t-1', 'ashu', 'twitch')
+      const secondIdentity = await seedIdentity('t-2', 'ashu_alt', 'twitch')
+      expect(await link(fanId, firstIdentity)).toEqual({ ok: true })
+
+      const refusal = await withTransaction(db.pool, async (tx) => {
+        const result = await linkIdentity(tx, { fanId, identityId: secondIdentity, cfg })
+        await tx.query('select 1')
+        return result
+      })
+
+      expect(refusal).toEqual({ ok: false, reason: 'same_provider' })
+      expect((await identityRow(secondIdentity)).fan_id).toBeNull()
+    })
+
     it("brings the identity's existing earns onto the account", async () => {
       // XP arrives before anyone links anything, so a first link must make the fan's
       // standing reflect what the identity already brought.
@@ -440,8 +472,8 @@ describe('identities', () => {
       )
       await firstGated.promise
 
-      const second = withTransaction(db.pool, (tx) =>
-        linkIdentity(
+      const second = withTransaction(db.pool, async (tx) => {
+        const result = await linkIdentity(
           withPid(
             gateOn(
               tx,
@@ -454,8 +486,14 @@ describe('identities', () => {
             },
           ),
           { fanId, identityId: secondIdentity, cfg },
-        ),
-      )
+        )
+        // This refusal comes from the unique index, so it is the savepoint rollback that
+        // keeps the transaction alive. A statement here fails with 25P02 if the rollback
+        // (or its release) is missing — and a COMMIT would otherwise have been silently
+        // downgraded to ROLLBACK.
+        await tx.query('select 1')
+        return result
+      })
       await secondGated.promise
       releaseSecond.resolve()
       if (secondPid === undefined) throw new Error('the second link never reported its pid')
@@ -552,6 +590,32 @@ describe('identities', () => {
       const unlinked = await seedIdentity('y-1', 'other', 'youtube')
       expect(await detach(owner, unlinked)).toEqual({ ok: false, reason: 'not_attached' })
       expect((await identityRow(unlinked)).fan_id).toBeNull()
+    })
+
+    it('refuses to detach without a transaction', async () => {
+      // Without a transaction the fan lock would be released with its statement, the
+      // forfeit and the unlink would land separately, and two concurrent detaches could
+      // leave the fan with no identity at all. A bare pool must fail before any of that.
+      const fanId = await seedFan()
+      const identityId = await seedIdentity('t-1', 'ashu', 'twitch')
+      await award(identityId, 'twitch.follow', 50, 'follow-1')
+      expect(await link(fanId, identityId)).toEqual({ ok: true })
+      await keepAnother(fanId)
+
+      await expect(detachIdentity(db.pool, { fanId, identityId, cfg })).rejects.toThrow(
+        /SAVEPOINT can only be used in transaction blocks/i,
+      )
+
+      // Nothing moved: still attached, nothing forfeited.
+      const row = await identityRow(identityId)
+      expect(row.fan_id).toBe(fanId)
+      expect(row.linked_at).not.toBeNull()
+      const { rows } = await db.pool.query<{ forfeited_at: Date | null }>(
+        'select forfeited_at from xp_entries where identity_id = $1',
+        [identityId],
+      )
+      expect(rows).toHaveLength(1)
+      expect(rows.every((entry) => entry.forfeited_at === null)).toBe(true)
     })
 
     it('fails loud when the fan or the identity does not exist', async () => {
