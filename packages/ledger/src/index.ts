@@ -32,3 +32,9 @@ export {
   recomputeStanding,
   type Standing,
 } from './standing.js'
+export {
+  PenaltyError,
+  addPenalty,
+  type AddPenaltyInput,
+  type PenaltyErrorCode,
+} from './penalty.js'
