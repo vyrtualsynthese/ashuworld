@@ -1,6 +1,8 @@
 import type { Pool } from 'pg'
+import type { GameConfig } from '@ashuworld/gameconfig'
 import type { ProviderName } from '@ashuworld/providers'
 import { withTransaction, type Queryable } from './db.js'
+import { recomputeStanding } from './standing.js'
 
 export interface AwardInput {
   identityId: string
@@ -8,6 +10,7 @@ export interface AwardInput {
   actionKey: string
   amount: number
   idempotencyKey: string
+  cfg: GameConfig
 }
 
 /**
@@ -74,6 +77,30 @@ export interface IngestEventInput {
 }
 
 /**
+ * Brings the fan's standing up to date after an earn lands.
+ *
+ * An identity pays into an account only while it is attached: `fan_id` set and
+ * `linked_at` not null, exactly the condition the balance query uses. An identity nobody
+ * has linked yet has no account to update, so there is nothing to recompute.
+ *
+ * Without this, `peak_xp` would freeze at the last link, detach or punishment. A fan who
+ * earned their way to level 2 would still be shown level 1 until one of those happened —
+ * and a punishment would then recompute from the post-punishment balance and pin the
+ * high-water mark below what the fan had actually reached.
+ */
+async function recomputeAwardedFanStanding(tx: Queryable, input: AwardInput): Promise<void> {
+  const { rows } = await tx.query<{ fan_id: string }>(
+    `select fan_id
+       from provider_identities
+      where id = $1 and fan_id is not null and linked_at is not null`,
+    [input.identityId],
+  )
+  const attached = rows[0]
+  if (attached === undefined) return
+  await recomputeStanding(tx, attached.fan_id, input.cfg)
+}
+
+/**
  * Pays a one-time action at most once per identity, and says why.
  *
  * The insert is the check: `on conflict do nothing` covers both unique keys on
@@ -98,6 +125,9 @@ export interface IngestEventInput {
  *
  * There is no read-then-write window to lose: the reads only happen after the database
  * has already refused the write.
+ *
+ * A successful award also recomputes the attached fan's standing in the same transaction,
+ * so the badge moves the moment the fan earns. See `recomputeAwardedFanStanding`.
  */
 export async function awardOnce(tx: Queryable, input: AwardInput): Promise<AwardResult> {
   const { rows } = await tx.query<{ id: string }>(
@@ -108,7 +138,10 @@ export async function awardOnce(tx: Queryable, input: AwardInput): Promise<Award
     [input.identityId, input.provider, input.actionKey, input.amount, input.idempotencyKey],
   )
   const inserted = rows[0]
-  if (inserted !== undefined) return { awarded: true, entryId: inserted.id, reason: 'awarded' }
+  if (inserted !== undefined) {
+    await recomputeAwardedFanStanding(tx, input)
+    return { awarded: true, entryId: inserted.id, reason: 'awarded' }
+  }
 
   // The one-time key was spent: name the row that spent it.
   const spent = await tx.query<{ id: string }>(

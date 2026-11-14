@@ -33,6 +33,7 @@ export {
   type Standing,
 } from './standing.js'
 export {
+  MAX_PENALTY_XP,
   PenaltyError,
   addPenalty,
   type AddPenaltyInput,
