@@ -1,15 +1,20 @@
-import { screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
+import { MemoryRouter, RouterProvider, createMemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
-import { MemoryRouter } from 'react-router-dom'
-import { render } from '@testing-library/react'
-import { CGU, CONFIDENTIALITE, MENTIONS_LEGALES } from '../src/legal/content'
-import { LegalPage } from '../src/pages/Legal'
+import { routes } from '../src/App'
 import { Footer } from '../src/components/Footer'
+import {
+  CGU,
+  CONFIDENTIALITE,
+  MENTIONS_LEGALES,
+  type LegalDocument,
+} from '../src/legal/content'
+import { LegalPage } from '../src/pages/Legal'
 
-function renderLegal(document: typeof CGU) {
+function renderLegal(legal: LegalDocument) {
   return render(
     <MemoryRouter>
-      <LegalPage document={document} />
+      <LegalPage document={legal} />
     </MemoryRouter>,
   )
 }
@@ -32,6 +37,14 @@ describe('legal pages', () => {
     expect(screen.getByText(/aucun traceur/i)).toBeInTheDocument()
   })
 
+  it('keeps the ledger after erasure, under a pseudonym, to prevent a second payment', () => {
+    renderLegal(CONFIDENTIALITE)
+    expect(screen.getByText(/entrées du registre d’XP/)).toHaveTextContent(/pseudonyme/i)
+    expect(screen.getByText(/entrées du registre d’XP/)).toHaveTextContent(
+      /second paiement/i,
+    )
+  })
+
   it('says a level is never lost and a detach forfeits XP', () => {
     renderLegal(CGU)
     expect(screen.getByText(/niveau n’est jamais perdu|niveau n'est jamais perdu/i)).toBeInTheDocument()
@@ -43,5 +56,22 @@ describe('legal pages', () => {
     expect(screen.getByRole('link', { name: 'Mentions légales' })).toHaveAttribute('href', '/mentions-legales')
     expect(screen.getByRole('link', { name: 'Politique de confidentialité' })).toHaveAttribute('href', '/confidentialite')
     expect(screen.getByRole('link', { name: 'CGU' })).toHaveAttribute('href', '/cgu')
+  })
+
+  it.each([
+    { path: '/mentions-legales', legal: MENTIONS_LEGALES },
+    { path: '/confidentialite', legal: CONFIDENTIALITE },
+    { path: '/cgu', legal: CGU },
+  ])('serves $path with its own title and the footer', ({ path, legal }) => {
+    const router = createMemoryRouter(routes, { initialEntries: [path] })
+    render(<RouterProvider router={router} />)
+
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(legal.title)
+    expect(document.title).toBe(legal.title)
+
+    // The footer is rendered by `Layout`, so the legal navigation must be there on every
+    // page, including the three legal pages themselves.
+    const legalNav = screen.getByRole('navigation', { name: 'Liens légaux' })
+    expect(within(legalNav).getAllByRole('link')).toHaveLength(3)
   })
 })

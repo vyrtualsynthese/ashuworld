@@ -42,7 +42,7 @@ export const MENTIONS_LEGALES: LegalDocument = {
   description:
     'Éditeur, directeur de la publication, hébergeur et informations légales du site AshuWorld.',
   version: TERMS_VERSION,
-  updated: '2026-11-14',
+  updated: TERMS_VERSION,
   sections: [
     {
       heading: 'Éditeur du site',
@@ -66,8 +66,8 @@ export const MENTIONS_LEGALES: LegalDocument = {
     {
       heading: 'Hébergement',
       paragraphs: [
-        `Le site est hébergé par ${COMPANY.host}, à l’adresse de son siège social indiquée ci-dessus.`,
-        'Aucun hébergeur tiers n’intervient : l’infrastructure est exploitée par l’éditeur lui-même, en France.',
+        `${COMPANY.name} assure l’auto-hébergement du site : le service est exploité sur l’infrastructure privée de l’éditeur, en France.`,
+        'Aucun hébergeur tiers n’intervient. Le siège social indiqué ci-dessus est celui de l’éditeur ; ce n’est pas l’adresse de la machine, dont l’emplacement physique n’est pas publié.',
       ],
     },
     {
@@ -89,7 +89,7 @@ export const MENTIONS_LEGALES: LegalDocument = {
     {
       heading: 'Liens externes',
       paragraphs: [
-        'Le site renvoie vers des plateformes tierces, notamment Twitch, YouTube, Google et Discord, pour la connexion et la vérification des actions.',
+        'Le site renvoie vers des plateformes tierces, chacune pour un usage précis : Twitch et Discord servent à la connexion et à la vérification des actions ; Google sert à la connexion ; YouTube sert à vérifier l’abonnement à la chaîne, à travers le compte Google.',
         'Ces plateformes ont leurs propres conditions d’utilisation et leur propre politique de confidentialité. L’éditeur ne les contrôle pas et n’est pas responsable de leur contenu ni de leurs pratiques.',
       ],
     },
@@ -110,12 +110,12 @@ export const CONFIDENTIALITE: LegalDocument = {
   description:
     'Quelles données AshuWorld collecte, pourquoi, pendant combien de temps, et comment exercer tes droits.',
   version: TERMS_VERSION,
-  updated: '2026-11-14',
+  updated: TERMS_VERSION,
   sections: [
     {
       heading: 'Responsable du traitement',
       paragraphs: [
-        `${COMPANY.name}, ${COMPANY.legalForm} au capital de ${COMPANY.capital}, dont le siège social est situé ${COMPANY.address}, est responsable du traitement des données décrites dans cette page.`,
+        `${COMPANY.name}, dont le siège social est situé au ${COMPANY.address}, est responsable du traitement des données décrites dans cette page.`,
         `Pour toute question ou pour exercer un droit, écris à ${COMPANY.email}.`,
       ],
     },
@@ -154,15 +154,16 @@ export const CONFIDENTIALITE: LegalDocument = {
     {
       heading: 'Destinataires',
       paragraphs: [
-        'Aucun destinataire ne reçoit ces données en dehors de l’éditeur, qui les exploite pour les finalités ci-dessus.',
+        `Aucun sous-traitant ne reçoit ces données. Seul l’éditeur, qui les exploite pour les finalités ci-dessus, y a accès.`,
         'Elles ne sont ni vendues, ni louées, ni transmises à des fins publicitaires.',
+        'Les plateformes de connexion (Twitch, Google, Discord) sont des responsables de traitement indépendants pour l’authentification : elles appliquent leurs propres politiques de confidentialité, sur lesquelles l’éditeur n’a pas de prise.',
       ],
     },
     {
       heading: 'Hébergement et transferts hors Union européenne',
       paragraphs: [
         'Le service est auto-hébergé sur une infrastructure privée située en France et exploitée par l’éditeur. Aucun sous-traitant d’hébergement n’intervient.',
-        'Aucun transfert de données vers un pays situé hors de l’Union européenne n’a lieu.',
+        'Aucune donnée que l’éditeur détient n’est transférée vers un pays situé hors de l’Union européenne. La connexion à une plateforme tierce se déroule sous la responsabilité de cette plateforme, selon ses propres règles.',
       ],
     },
     {
@@ -172,6 +173,7 @@ export const CONFIDENTIALITE: LegalDocument = {
       ],
       list: [
         'compte et identités rattachées : trois ans après la dernière connexion ;',
+        'entrées du registre d’XP : conservées après l’anonymisation du compte, sous forme pseudonyme, tant que la prévention d’un second paiement de la même action l’exige, et non réidentifiables sans la clé détenue par le serveur ;',
         'événements de plateforme traités : 30 jours ;',
         'journal d’audit : trois ans ;',
         'journaux applicatifs : 30 jours ;',
@@ -195,18 +197,13 @@ export const CONFIDENTIALITE: LegalDocument = {
     {
       heading: 'Cookies et traceurs',
       paragraphs: [
-        'Le site dépose deux cookies, tous deux strictement nécessaires à son fonctionnement :',
+        'Le site dépose deux cookies, tous deux strictement nécessaires à son fonctionnement. Leur nom, leur rôle et leur durée de vie sont les suivants.',
+        'Aucun traceur publicitaire, analytique ou de réseau social n’est déposé, et aucune donnée n’est transmise à un tiers à cette fin.',
+        'Ces deux cookies étant strictement nécessaires, ils ne demandent pas de consentement : c’est pourquoi le site n’affiche pas de bandeau de cookies.',
       ],
       list: [
         'ashuworld_session : le jeton de session qui te garde connecté. Il est HttpOnly et expire au bout de 30 jours.',
         'ashu_oauth_state : il relie une tentative de connexion au navigateur qui l’a lancée, pour empêcher qu’une connexion soit détournée. Il expire au bout de 10 minutes.',
-      ],
-    },
-    {
-      heading: 'Traceurs et consentement',
-      paragraphs: [
-        'Aucun traceur publicitaire, analytique ou de réseau social n’est déposé, et aucune donnée n’est transmise à un tiers à cette fin.',
-        'Les deux cookies ci-dessus étant strictement nécessaires, ils ne demandent pas de consentement : c’est pourquoi le site n’affiche pas de bandeau de cookies.',
       ],
     },
     {
@@ -254,7 +251,7 @@ export const CGU: LegalDocument = {
   description:
     'Les règles d’utilisation d’AshuWorld : compte, identités rattachées, XP, niveaux et sanctions.',
   version: TERMS_VERSION,
-  updated: '2026-11-14',
+  updated: TERMS_VERSION,
   sections: [
     {
       heading: 'Objet',
@@ -299,7 +296,7 @@ export const CGU: LegalDocument = {
         'L’XP récompense des actions vérifiées par la plateforme qui les héberge. Elle n’est pas une monnaie : elle ne s’achète pas, ne se vend pas, ne s’échange pas et ne donne droit à aucun achat.',
         'Une action à bonus unique n’est payée qu’une seule fois par identité de plateforme. Une action récurrente est créditée chaque mois tant que sa condition est remplie.',
         'Les niveaux n’ont pas de maximum : chaque niveau demande plus d’XP que le précédent. L’XP peut baisser après une sanction ou un changement de règle, mais un niveau n’est jamais perdu.',
-        'Le détachement d’une identité est une perte définitive : l’XP gagnée grâce à elle est abandonnée, et rattacher à nouveau la même identité ne la rend pas. Un avertissement le rappelle avant le rattachement.',
+        'Le détachement d’une identité est une perte définitive : l’XP gagnée grâce à elle est abandonnée, et rattacher à nouveau la même identité ne la rend pas. Un avertissement le rappelle avant le détachement.',
       ],
     },
     {

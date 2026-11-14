@@ -291,7 +291,7 @@ a:focus-visible {
 
 .site-footer a {
   color: var(--muted);
-  text-decoration: none;
+  text-decoration: underline;
 }
 
 .site-footer a:hover {
