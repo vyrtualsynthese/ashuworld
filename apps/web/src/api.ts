@@ -38,7 +38,6 @@ export interface FanIdentity {
 
 /** What the public profile answers: the fan, the standing and the attached accounts. */
 export interface PublicFan {
-  id: string
   handle: string
   displayName: string
   level: number

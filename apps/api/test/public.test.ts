@@ -418,7 +418,6 @@ describe('GET /api/public/fans/:handle', () => {
 
       expect(res.statusCode).toBe(200)
       expect(res.json()).toEqual({
-        id: fanId,
         handle: 'ashu',
         displayName: 'Ashu',
         level: 1,
@@ -428,6 +427,18 @@ describe('GET /api/public/fans/:handle', () => {
       })
       expect(res.headers['set-cookie']).toBeUndefined()
       expect(res.headers['cache-control']).toBe('public, max-age=15')
+    })
+  })
+
+  it('does not publish the account id', async () => {
+    const fanId = await seedFan('ashu', 'Ashu')
+    await link(fanId, await seedIdentity('twitch', 't-ashu', 'ashu_tv'))
+
+    await withApp(async (app) => {
+      const res = await app.inject({ method: 'GET', url: '/api/public/fans/ashu' })
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).not.toHaveProperty('id')
     })
   })
 

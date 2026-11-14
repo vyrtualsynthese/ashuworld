@@ -25,7 +25,6 @@ export interface FreeStandingRow {
 
 /** A public profile: the account, its standing and the identities currently attached. */
 export interface PublicFanProfile {
-  id: string
   handle: string
   displayName: string
   level: number
@@ -181,7 +180,6 @@ export async function getFanByHandle(
   )
 
   return {
-    id: fan.id,
     handle: fan.handle,
     displayName: fan.display_name,
     level: standing.level,
