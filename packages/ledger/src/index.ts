@@ -61,6 +61,20 @@ export {
   type PenaltyErrorCode,
 } from './penalty.js'
 export {
+  ERASURE_PEPPER_ENV,
+  IdentityAttachedError,
+  IdentityNotFoundError,
+  eraseFan,
+  eraseIdentity,
+  erasedExternalId,
+  exportFan,
+  type EraseFanResult,
+  type EraseIdentityResult,
+  type ExportEntry,
+  type ExportIdentity,
+  type FanExport,
+} from './privacy.js'
+export {
   ALPHA_RESET_CONFIRM_ENV,
   ALPHA_RESET_CONFIRM_VALUE,
   AlphaResetError,
