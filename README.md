@@ -102,7 +102,8 @@ files.
 #### Fill the ladder without keys
 
 The worker can run a stub source that invents Dachis, so the ladder can be tried before any
-platform application exists. Write the two switches the stub needs and start the stack:
+platform application exists. Write the switches the stub needs (this overwrites `.env`) and start
+the stack:
 
 ```bash
 printf 'PLATFORM_CONNECTORS=stub\nALLOW_STUB_CONNECTORS=true\nSTUB_PEOPLE=500\n' > .env
@@ -110,10 +111,11 @@ docker compose -f compose.dev.yaml up --build
 ```
 
 The worker invents 500 people, they appear as unattached rows on `/ladder`, and they can be wiped
-with `docker compose -f compose.dev.yaml down -v`.
+with `docker compose -f compose.dev.yaml down -v`, which drops all local dev data — the whole
+database, not only the invented rows.
 
-The stack reads `.env` when it is there and ignores it when it is not; `.env.example` lists every
-name the worker understands, and `.env` is git-ignored.
+The api and worker read `.env` when it is there and ignore it when it is not; `.env.example` lists
+every name they understand, and `.env` is git-ignored.
 
 ### Validate before pushing
 
