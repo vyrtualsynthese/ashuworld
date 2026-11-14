@@ -38,8 +38,9 @@ numbers can be tuned against real behaviour.
 | `deploy/helm/ashuworld` | The chart: deployments, ingress, migration and reset jobs. |
 | `docker/` | Three images: esbuild bundles, non-root, read-only root filesystem. |
 
-The `/xp` page lists every action and its value, read from `packages/gameconfig/config/game.json`;
-changing an amount there changes the page without a code change.
+The `/xp` page lists every action with its one-time bonus and its monthly amount, read from
+`packages/gameconfig/config/game.json`; changing an amount there changes the page without a
+code change.
 
 ## Run it locally
 

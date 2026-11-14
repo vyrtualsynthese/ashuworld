@@ -15,7 +15,8 @@ channel into a farm for a number nobody trusts.
 ## Goals
 
 - One Dachi identity that spans providers, with explicit link, merge and detach.
-- XP awarded automatically from platform events. Phase one is one-time actions only.
+- XP awarded automatically from platform events. Phase one is a one-time action bonus plus
+  a monthly credit while the condition still holds.
 - Abuse handled by construction, not by moderation after the fact: a one-time action
   can credit once per provider identity.
 - XP never decreases except by an explicit punishment, and a level is never lost.
@@ -246,6 +247,19 @@ Alpha actions, all verified by the platform that owns them:
 | Followed the channel | Twitch | EventSub `channel.follow`, follower poll as the fallback |
 | Subscribed to the channel | YouTube | `subscriptions.list(mine=true)` with the Dachi's own grant, at link and on a poll |
 | Member of the Discord server | Discord | Bot gateway, membership sync on boot |
+
+Each of those pays a **one-time bonus** when it is first verified, then a **monthly
+amount** for as long as its condition holds: following the channel on Twitch, an active
+YouTube subscription, membership of the Discord server. The monthly credit stops as soon
+as the fan unfollows, unsubscribes or leaves the server; the months after that are simply
+not paid. Nothing already earned is taken back: the one-time bonus, the monthly credits
+already paid and the level stay, and the level never drops.
+
+The recurring amount is `monthly` in `config/game.json`, beside `amount`, and is validated
+the same way as a config value (a non-negative integer). The ledger writes each month as
+its own entry (`twitch.follow@2026-11`), so the existing one-time unique index also makes
+one month pay at most once. A month with no condition is not credited; a month already
+credited is not credited twice.
 
 ### Display
 

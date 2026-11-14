@@ -57,6 +57,8 @@ export interface PublicAction {
   key: string
   provider: string
   amount: number
+  /** The recurring amount while the condition holds; 0 when the action has none. */
+  monthly: number
   label: string
   description: string
 }
@@ -74,10 +76,12 @@ export interface PublicGame {
 /**
  * The game rules as the page may see them.
  *
- * Only the five fields the page renders leave this function: the config also carries
+ * Only the six fields the page renders leave this function: the config also carries
  * `version`, and a future field (an internal flag, a rollout switch) must not become
  * public just because someone added it next to an amount. `label` falls back to the key
  * so a hand-built config, which may omit the words, still renders something truthful.
+ * `monthly` is normalised to 0 rather than left absent, so the page and its API contract
+ * have one shape for an action with no recurring amount.
  *
  * The sort is by amount descending, then key ascending by code unit: the highest-value
  * action leads, and two actions with the same value have one fixed order on every
@@ -89,6 +93,7 @@ export function publicGame(cfg: GameConfig): PublicGame {
       key,
       provider: action.provider,
       amount: action.amount,
+      monthly: action.monthly ?? 0,
       label: action.label ?? key,
       description: action.description ?? '',
     }))

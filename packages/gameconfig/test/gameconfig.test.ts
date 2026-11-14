@@ -10,16 +10,18 @@ const followAction = {
   description: 'Une seule fois, par compte Twitch rattaché.',
 }
 
+const discordAction = {
+  amount: 75,
+  provider: 'discord',
+  label: 'Rejoindre le serveur Discord',
+  description: 'Une seule fois, par compte Discord rattaché.',
+}
+
 const valid = (): Record<string, unknown> => ({
   version: '2026-11-14.1',
   actions: {
     'twitch.follow': followAction,
-    'discord.member': {
-      amount: 75,
-      provider: 'discord',
-      label: 'Rejoindre le serveur Discord',
-      description: 'Une seule fois, par compte Discord rattaché.',
-    },
+    'discord.member': discordAction,
   },
   levels: [
     { level: 0, minXp: 0 },
@@ -123,6 +125,36 @@ describe('loadGameConfig input shape', () => {
     expect(amount(undefined)).toBe(
       'action "twitch.follow" must have a positive integer amount, got undefined',
     )
+  })
+
+  it('rejects a monthly amount that is not a non-negative integer', () => {
+    const monthly = (value: unknown): string =>
+      loadActions({ 'twitch.follow': { ...followAction, monthly: value } })
+    expect(monthly(-5)).toBe(
+      'action "twitch.follow" must have a non-negative integer monthly amount, got -5',
+    )
+    expect(monthly(5.5)).toBe(
+      'action "twitch.follow" must have a non-negative integer monthly amount, got 5.5',
+    )
+    expect(monthly('5')).toBe(
+      'action "twitch.follow" must have a non-negative integer monthly amount, got "5"',
+    )
+    expect(monthly(null)).toBe(
+      'action "twitch.follow" must have a non-negative integer monthly amount, got null',
+    )
+  })
+
+  it('accepts an absent or zero monthly amount, and a positive one', () => {
+    const cfg = loadGameConfig({
+      ...valid(),
+      actions: {
+        'twitch.follow': { ...followAction, monthly: 0 },
+        'discord.member': { ...discordAction, monthly: 10 },
+      },
+    })
+    expect(cfg.actions['twitch.follow']?.monthly).toBe(0)
+    expect(cfg.actions['discord.member']?.monthly).toBe(10)
+    expect(loadGameConfig(valid()).actions['twitch.follow']?.monthly).toBeUndefined()
   })
 
   it('rejects a provider that is not a known platform', () => {
@@ -284,21 +316,24 @@ describe('shipped config/game.json', () => {
     expect(cfg.actions['twitch.follow']?.provider).toBe('twitch')
   })
 
-  it('carries the French label and the one-per-account rule for every action', () => {
+  it('carries the French label, the one-per-account rule and the monthly amount for every action', () => {
     expect(cfg.actions['twitch.follow']).toEqual({
       amount: 50,
+      monthly: 5,
       provider: 'twitch',
       label: 'Suivre la chaîne sur Twitch',
       description: 'Une seule fois, par compte Twitch rattaché.',
     })
     expect(cfg.actions['youtube.subscribe']).toEqual({
       amount: 50,
+      monthly: 5,
       provider: 'youtube',
       label: "S'abonner à la chaîne sur YouTube",
       description: 'Une seule fois, par compte YouTube rattaché.',
     })
     expect(cfg.actions['discord.member']).toEqual({
       amount: 75,
+      monthly: 10,
       provider: 'discord',
       label: 'Rejoindre le serveur Discord',
       description: 'Une seule fois, par compte Discord rattaché.',

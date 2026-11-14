@@ -245,6 +245,7 @@ describe('GET /api/public/game', () => {
             key: 'youtube.subscribe',
             provider: 'youtube',
             amount: 100,
+            monthly: 0,
             label: 'youtube.subscribe',
             description: '',
           },
@@ -252,6 +253,7 @@ describe('GET /api/public/game', () => {
             key: 'discord.member',
             provider: 'discord',
             amount: 75,
+            monthly: 0,
             label: 'discord.member',
             description: '',
           },
@@ -259,6 +261,7 @@ describe('GET /api/public/game', () => {
             key: 'twitch.follow',
             provider: 'twitch',
             amount: 50,
+            monthly: 0,
             label: 'twitch.follow',
             description: '',
           },
@@ -300,12 +303,14 @@ describe('GET /api/public/game', () => {
       actions: {
         'zeta.follow': {
           amount: 999,
+          monthly: 3,
           provider: 'twitch',
           label: 'Suivre Zeta',
           description: 'Une seule fois.',
         },
         'alpha.member': {
           amount: 999,
+          monthly: 4,
           provider: 'discord',
           label: 'Rejoindre Alpha',
           description: 'Une seule fois aussi.',
@@ -330,6 +335,7 @@ describe('GET /api/public/game', () => {
             key: 'alpha.member',
             provider: 'discord',
             amount: 999,
+            monthly: 4,
             label: 'Rejoindre Alpha',
             description: 'Une seule fois aussi.',
           },
@@ -337,6 +343,7 @@ describe('GET /api/public/game', () => {
             key: 'zeta.follow',
             provider: 'twitch',
             amount: 999,
+            monthly: 3,
             label: 'Suivre Zeta',
             description: 'Une seule fois.',
           },
@@ -351,7 +358,7 @@ describe('GET /api/public/game', () => {
     }
   })
 
-  it('exposes nothing from the config beyond the five rule fields', async () => {
+  it('exposes nothing from the config beyond the six rule fields', async () => {
     await withApp(async (app) => {
       const res = await app.inject({ method: 'GET', url: '/api/public/game' })
       const body = res.json() as Record<string, unknown>
@@ -364,6 +371,7 @@ describe('GET /api/public/game', () => {
           'description',
           'key',
           'label',
+          'monthly',
           'provider',
         ])
       }
