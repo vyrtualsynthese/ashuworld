@@ -973,6 +973,7 @@ git add packages/ledger apps/api && git commit -m "✨ feat: public profile and 
 
 **Files:**
 - Create: `apps/web/package.json`, `apps/web/tsconfig.json`, `apps/web/index.html`, `vite.config.ts`, `src/main.tsx`, `src/App.tsx`, `src/api.ts`, `src/pages/Home.tsx`, `src/pages/Ladder.tsx`, `src/pages/Profile.tsx`, `src/pages/Account.tsx`
+- Note: the base tsconfig has `lib: ["ES2023"]` and no `jsx`; this task's own `tsconfig.json` must add `"lib": ["ES2023", "DOM", "DOM.Iterable"]` and `"jsx": "react-jsx"`, and use `"moduleResolution": "Bundler"`. Getting that wrong looks like a bug in the skeleton and is not one.
 - Test: `apps/web/test/pages.test.tsx`
 
 **Interfaces:**
