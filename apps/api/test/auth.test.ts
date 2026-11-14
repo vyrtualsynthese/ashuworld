@@ -1,3 +1,4 @@
+import { Writable } from 'node:stream'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import type { GameConfig } from '@ashuworld/gameconfig'
@@ -15,6 +16,7 @@ import type { Env } from '../src/config.js'
 import { buildServer } from '../src/server.js'
 import { consumeHandshake, startHandshake } from '../src/auth/handshake.js'
 import {
+  HandleExhaustedError,
   MAX_HANDLE_ATTEMPTS,
   baseHandle,
   createFanWithUniqueHandle,
@@ -22,6 +24,7 @@ import {
 } from '../src/auth/handles.js'
 import { createDevProvider } from '../src/auth/providers.js'
 import { createSession } from '../src/auth/session.js'
+import { OAUTH_STATE_COOKIE_NAME } from '../src/routes/auth.js'
 
 const cfg: GameConfig = {
   version: 'test',
@@ -84,13 +87,35 @@ interface Injected {
   body: string
 }
 
-function setCookieOf(res: Injected): string {
-  return String(res.headers['set-cookie'] ?? '')
+function cookiesOf(res: Injected): string[] {
+  const header = res.headers['set-cookie']
+  if (header === undefined) return []
+  return Array.isArray(header) ? header.map(String) : [String(header)]
+}
+
+function cookieNamed(res: Injected, name: string): string | undefined {
+  return cookiesOf(res).find((cookie) => cookie.startsWith(`${name}=`))
+}
+
+function cookieValue(cookie: string): string {
+  const pair = cookie.split(';')[0] ?? ''
+  return pair.slice(pair.indexOf('=') + 1)
+}
+
+/** The session cookie the response set, if any. Its absence is what "no login" means. */
+function sessionSetCookie(res: Injected): string | undefined {
+  return cookieNamed(res, COOKIE)
 }
 
 function sessionCookieOf(res: Injected): string {
-  const pair = setCookieOf(res).split(';')[0] ?? ''
-  return pair.slice(pair.indexOf('=') + 1)
+  const cookie = sessionSetCookie(res)
+  return cookie === undefined ? '' : cookieValue(cookie)
+}
+
+/** The browser-binding cookie's value, or undefined when the response did not set one. */
+function bindingValueOf(res: Injected): string | undefined {
+  const cookie = cookieNamed(res, OAUTH_STATE_COOKIE_NAME)
+  return cookie === undefined ? undefined : cookieValue(cookie)
 }
 
 function locationOf(res: Injected): string {
@@ -135,15 +160,33 @@ async function newState(
 
 async function callback(
   app: FastifyInstance,
-  options: { state: string; code?: string; provider?: string; cookie?: string },
+  options: {
+    state: string
+    code?: string
+    provider?: string
+    cookie?: string
+    /** Defaults to the state, as a browser that started the handshake would hold. */
+    stateCookie?: string | null
+    host?: string
+  },
 ): Promise<Injected> {
   const query = new URLSearchParams({ state: options.state })
   if (options.code !== undefined) query.set('code', options.code)
   const provider = options.provider ?? 'dev'
+
+  const jars: string[] = []
+  if (options.cookie !== undefined) jars.push(`${COOKIE}=${options.cookie}`)
+  const binding = options.stateCookie === undefined ? options.state : options.stateCookie
+  if (binding !== null) jars.push(`${OAUTH_STATE_COOKIE_NAME}=${binding}`)
+
+  const headers: Record<string, string> = {}
+  if (jars.length > 0) headers['cookie'] = jars.join('; ')
+  if (options.host !== undefined) headers['host'] = options.host
+
   return app.inject({
     method: 'GET',
     url: `/auth/${provider}/callback?${query.toString()}`,
-    ...(options.cookie === undefined ? {} : { headers: cookieHeader(options.cookie) }),
+    ...(Object.keys(headers).length === 0 ? {} : { headers }),
   })
 }
 
@@ -221,7 +264,7 @@ describe('GET /auth/:provider/start', () => {
       expect(res.json()).toEqual({
         error: { code: 'unknown_provider', message: 'that sign-in provider is not configured' },
       })
-      expect(res.headers['set-cookie']).toBeUndefined()
+      expect(cookiesOf(res)).toEqual([])
     })
   })
 
@@ -256,10 +299,43 @@ describe('GET /auth/:provider/start', () => {
       expect(location.searchParams.get('code')).toBe('ashu')
       expect(location.searchParams.get('state')).toMatch(/^[A-Za-z0-9_-]{43}$/)
       // R18: the only place a session cookie may be set is a callback that verified an
-      // identity. A start carries no proof, so it must carry no cookie.
-      expect(res.headers['set-cookie']).toBeUndefined()
+      // identity. The start sets only the browser-binding state cookie.
+      expect(sessionSetCookie(res)).toBeUndefined()
+      const binding = cookieNamed(res, OAUTH_STATE_COOKIE_NAME)
+      expect(binding).toBeDefined()
+      expect(binding).toContain('HttpOnly')
+      expect(binding).toContain('SameSite=Lax')
+      expect(binding).toContain('Path=/auth')
+      expect(binding).toContain('Max-Age=600')
+      expect(binding).not.toContain('Secure')
+      expect(bindingValueOf(res)).toBe(location.searchParams.get('state'))
       expect(await count('oauth_handshakes')).toBe(1)
       expect(await count('sessions')).toBe(0)
+    })
+  })
+
+  it('marks the binding cookie Secure when COOKIE_SECURE is true', async () => {
+    await withApp(
+      async (app) => {
+        const res = await startDev(app)
+        expect(cookieNamed(res, OAUTH_STATE_COOKIE_NAME)).toContain('Secure')
+      },
+      { COOKIE_SECURE: true },
+    )
+  })
+
+  it('builds the provider redirect from PUBLIC_BASE_URL, not the request Host', async () => {
+    await withApp(async (app) => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/auth/dev/start?purpose=login',
+        headers: { host: 'evil.example' },
+      })
+
+      expect(res.statusCode).toBe(302)
+      const location = new URL(locationOf(res))
+      expect(location.origin).toBe('http://localhost:3000')
+      expect(location.href).not.toContain('evil.example')
     })
   })
 
@@ -292,6 +368,22 @@ describe('GET /auth/:provider/start', () => {
         error: { code: 'invalid_purpose', message: 'purpose must be "login" or "link"' },
       })
       expect(await count('oauth_handshakes')).toBe(0)
+    })
+  })
+
+  it('refuses a duplicated purpose instead of defaulting to login', async () => {
+    await withApp(async (app) => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/auth/dev/start?purpose=link&purpose=login',
+      })
+
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toEqual({
+        error: { code: 'invalid_purpose', message: 'purpose must be "login" or "link"' },
+      })
+      expect(await count('oauth_handshakes')).toBe(0)
+      expect(await count('sessions')).toBe(0)
     })
   })
 
@@ -409,12 +501,14 @@ describe('GET /auth/:provider/callback: login', () => {
 
       expect(res.statusCode).toBe(302)
       expect(locationOf(res)).toBe('/account')
-      const setCookie = setCookieOf(res)
+      const setCookie = sessionSetCookie(res)
       expect(setCookie).toContain(`${COOKIE}=`)
       expect(setCookie).toContain('HttpOnly')
       expect(setCookie).toContain('SameSite=Lax')
       expect(setCookie).toContain('Path=/')
       expect(setCookie).not.toContain('Secure')
+      // The binding cookie is cleared on the terminal callback path.
+      expect(cookieNamed(res, OAUTH_STATE_COOKIE_NAME)).toContain('Max-Age=0')
       // The redirect body is empty; the only place the value appears is the cookie.
       expect(res.body).toBe('')
       expect(res.body).not.toContain(cookie)
@@ -491,6 +585,62 @@ describe('GET /auth/:provider/callback: login', () => {
     })
   })
 
+  it('succeeds when the callback presents the binding cookie the start set', async () => {
+    await withApp(async (app) => {
+      const start = await startDev(app)
+      const state = stateOf(start)
+      const binding = bindingValueOf(start)
+      if (binding === undefined) throw new Error('the start set no binding cookie')
+
+      const res = await callback(app, { state, code: 'ashu', stateCookie: binding })
+
+      expect(res.statusCode).toBe(302)
+      expect(locationOf(res)).toBe('/account')
+      expect(sessionSetCookie(res)).toBeDefined()
+      expect(await count('oauth_handshakes')).toBe(0)
+    })
+  })
+
+  it('refuses a callback with a valid state but no binding cookie, unconsumed', async () => {
+    await withApp(async (app) => {
+      const state = await newState(app)
+
+      // A 302 URL copied into another browser arrives without that browser's cookie.
+      const res = await callback(app, { state, code: 'ashu', stateCookie: null })
+
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toEqual({
+        error: { code: 'handshake_invalid', message: 'this sign-in link has expired or was already used' },
+      })
+      expect(sessionSetCookie(res)).toBeUndefined()
+      // Not consumed: the browser that really started the handshake can still finish.
+      expect(await count('oauth_handshakes')).toBe(1)
+      expect(await count('sessions')).toBe(0)
+
+      const retry = await callback(app, { state, code: 'ashu' })
+      expect(retry.statusCode).toBe(302)
+    })
+  })
+
+  it('refuses a callback whose binding cookie names another state, unconsumed', async () => {
+    await withApp(async (app) => {
+      const state = await newState(app)
+
+      const res = await callback(app, {
+        state,
+        code: 'ashu',
+        stateCookie: 'x'.repeat(43),
+      })
+
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toMatchObject({ error: { code: 'handshake_invalid' } })
+      expect(await count('oauth_handshakes')).toBe(1)
+
+      const retry = await callback(app, { state, code: 'ashu' })
+      expect(retry.statusCode).toBe(302)
+    })
+  })
+
   it('refuses to reuse a handshake state', async () => {
     await withApp(async (app) => {
       const state = await newState(app)
@@ -502,7 +652,8 @@ describe('GET /auth/:provider/callback: login', () => {
       expect(second.json()).toEqual({
         error: { code: 'handshake_invalid', message: 'this sign-in link has expired or was already used' },
       })
-      expect(second.headers['set-cookie']).toBeUndefined()
+      expect(sessionSetCookie(second)).toBeUndefined()
+      expect(cookieNamed(second, OAUTH_STATE_COOKIE_NAME)).toContain('Max-Age=0')
       expect(await count('sessions')).toBe(1)
     })
   })
@@ -518,7 +669,7 @@ describe('GET /auth/:provider/callback: login', () => {
       const res = await callback(app, { state, code: 'ashu' })
       expect(res.statusCode).toBe(400)
       expect(res.json()).toMatchObject({ error: { code: 'handshake_invalid' } })
-      expect(res.headers['set-cookie']).toBeUndefined()
+      expect(sessionSetCookie(res)).toBeUndefined()
       expect(await count('fans')).toBe(0)
       expect(await count('sessions')).toBe(0)
     })
@@ -534,7 +685,7 @@ describe('GET /auth/:provider/callback: login', () => {
       const noCode = await callback(app, { state })
       expect(noCode.statusCode).toBe(400)
       expect(noCode.json()).toMatchObject({ error: { code: 'invalid_request' } })
-      expect(noCode.headers['set-cookie']).toBeUndefined()
+      expect(sessionSetCookie(noCode)).toBeUndefined()
     })
   })
 
@@ -545,7 +696,7 @@ describe('GET /auth/:provider/callback: login', () => {
 
       expect(res.statusCode).toBe(400)
       expect(res.json()).toMatchObject({ error: { code: 'provider_error' } })
-      expect(res.headers['set-cookie']).toBeUndefined()
+      expect(sessionSetCookie(res)).toBeUndefined()
       expect(await count('fans')).toBe(0)
       expect(await count('sessions')).toBe(0)
     })
@@ -567,7 +718,7 @@ describe('GET /auth/:provider/callback: login', () => {
 
       expect(again.res.statusCode).toBe(302)
       expect(locationOf(again.res)).toBe('/account?reattach=dev')
-      expect(again.res.headers['set-cookie']).toBeUndefined()
+      expect(sessionSetCookie(again.res)).toBeUndefined()
       expect((await identityRow('dev:ashu')).fan_id).toBeNull()
       expect(await count('fans')).toBe(1)
       // Only the session from before the detach still exists.
@@ -589,7 +740,8 @@ describe('GET /auth/:provider/callback: link', () => {
       expect(res.statusCode).toBe(302)
       expect(locationOf(res)).toBe('/account')
       // A link already has a proven fan; it must not mint a second session.
-      expect(res.headers['set-cookie']).toBeUndefined()
+      expect(sessionSetCookie(res)).toBeUndefined()
+      expect(cookieNamed(res, OAUTH_STATE_COOKIE_NAME)).toContain('Max-Age=0')
       expect(await count('fans')).toBe(1)
       const identity = await identityRow('dev:bob')
       expect(identity.fan_id).toBe(fanId)
@@ -611,7 +763,7 @@ describe('GET /auth/:provider/callback: link', () => {
       expect(res.json()).toEqual({
         error: { code: 'link_not_owner', message: 'this sign-in link was started by another fan' },
       })
-      expect(res.headers['set-cookie']).toBeUndefined()
+      expect(sessionSetCookie(res)).toBeUndefined()
       // Nothing is created for the identity that was proved: the swap must not attach it
       // to the fan that did not start the handshake.
       expect(await count('provider_identities')).toBe(0)
@@ -630,6 +782,7 @@ describe('GET /auth/:provider/callback: link', () => {
       expect(res.json()).toEqual({
         error: { code: 'unauthenticated', message: 'sign in to continue' },
       })
+      expect(sessionSetCookie(res)).toBeUndefined()
       expect(await count('provider_identities')).toBe(0)
     })
   })
@@ -646,6 +799,7 @@ describe('GET /auth/:provider/callback: link', () => {
       expect(res.json()).toEqual({
         error: { code: 'unauthenticated', message: 'sign in to continue' },
       })
+      expect(sessionSetCookie(res)).toBeUndefined()
       expect(await count('provider_identities')).toBe(0)
     })
   })
@@ -732,6 +886,62 @@ describe('GET /auth/:provider/callback: link', () => {
   })
 })
 
+describe('log redaction', () => {
+  it('keeps the callback code and state out of the request and error logs', async () => {
+    const lines: string[] = []
+    const stream = new Writable({
+      write(chunk, _encoding, done) {
+        lines.push(String(chunk))
+        done()
+      },
+    })
+    const app = buildServer({ pool: db.pool, cfg, env: testEnv(), logStream: stream })
+    // Registered before the first inject: Fastify refuses routes once the router is ready.
+    app.get('/test/boom', async () => {
+      throw new Error('boom')
+    })
+
+    let state = ''
+    try {
+      state = await newState(app)
+      const res = await callback(app, { state, code: 'ashu' })
+      expect(res.statusCode).toBe(302)
+
+      await app.inject({ method: 'GET', url: '/test/boom?secret=do-not-log' })
+    } finally {
+      await app.close()
+    }
+
+    const log = lines.join('')
+    // The request is still logged, just without its query string.
+    expect(log).toContain('/auth/dev/callback')
+    expect(log).toContain('/test/boom')
+    expect(log).not.toContain(state)
+    expect(log).not.toContain('code=ashu')
+    expect(log).not.toContain('secret=do-not-log')
+  })
+})
+
+describe('handle exhaustion', () => {
+  it('maps a typed exhaustion to a named 500 instead of the generic internal error', async () => {
+    await withApp(async (app) => {
+      app.get('/test/handle-exhausted', async () => {
+        throw new HandleExhaustedError('Ashu')
+      })
+
+      const res = await app.inject({ method: 'GET', url: '/test/handle-exhausted' })
+
+      expect(res.statusCode).toBe(500)
+      expect(res.json()).toEqual({
+        error: {
+          code: 'handle_exhausted',
+          message: 'no free handle based on "Ashu" after 100 attempts',
+        },
+      })
+    })
+  })
+})
+
 describe('handle generation', () => {
   it('lowercases and keeps only letters, digits and underscores', () => {
     expect(baseHandle('Ashu')).toBe('ashu')
@@ -770,7 +980,7 @@ describe('handle generation', () => {
 
     await expect(
       createFanWithUniqueHandle(refusing, { displayHandle: 'ashu', displayName: 'Ashu' }),
-    ).rejects.toThrow(/free handle/)
+    ).rejects.toBeInstanceOf(HandleExhaustedError)
     expect(attempted).toHaveLength(MAX_HANDLE_ATTEMPTS)
     expect(attempted[0]).toBe('ashu')
     expect(attempted[1]).toBe('ashu_2')
