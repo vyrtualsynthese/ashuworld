@@ -44,6 +44,7 @@ function testEnv(overrides: Partial<Env> = {}): Env {
     ALLOW_DEV_LOGIN: false,
     TRUST_PROXY: false,
     PUBLIC_BASE_URL: 'http://localhost:3000',
+    ERASURE_PEPPER: 'test-pepper',
     PORT: 3000,
     RATE_LIMIT_ENABLED: false,
     RATE_LIMIT_WINDOW_MS: 60_000,

@@ -24,12 +24,26 @@ export const HANDSHAKE_STATE_BYTES = 32
 /** 32 bytes base64url without padding: exactly 43 characters. */
 const STATE_PATTERN = /^[A-Za-z0-9_-]{43}$/
 
+/**
+ * The shape of a terms document version, such as `2026-11-14` or `2026-11-14.2`.
+ *
+ * The browser sends the version of the document it actually rendered, so this only checks
+ * the shape: whether that version exists is the site's business, and the value stored is
+ * the evidence of what the fan was shown, not a lookup key.
+ */
+export const TERMS_VERSION_PATTERN = /^\d{4}-\d{2}-\d{2}(\.\d+)?$/
+
 export interface StartHandshakeInput {
   /** The provider instance, not just its name: the same call builds the authorize URL. */
   provider: OAuthProvider
   purpose: HandshakePurpose
   /** The fan a `link` handshake will attach to. A `login` handshake has no owner yet. */
   fanId: string | null
+  /**
+   * The terms version the browser rendered and the fan accepted, or null when no
+   * acceptance was collected (a `link`, which starts from an already signed-in session).
+   */
+  termsVersion: string | null
   redirectUri: string
   loginHint?: string | undefined
 }
@@ -42,8 +56,13 @@ export interface StartHandshakeInput {
  * callback rely on that without re-checking an impossible state.
  */
 export type Handshake =
-  | { provider: ProviderName; purpose: 'login'; fanId: string | null }
-  | { provider: ProviderName; purpose: 'link'; fanId: string }
+  | {
+      provider: ProviderName
+      purpose: 'login'
+      fanId: string | null
+      termsVersion: string | null
+    }
+  | { provider: ProviderName; purpose: 'link'; fanId: string; termsVersion: string | null }
 
 export interface ConsumeHandshakeInput {
   state: string
@@ -71,9 +90,16 @@ export async function startHandshake(
 
   const state = randomBytes(HANDSHAKE_STATE_BYTES).toString('base64url')
   await tx.query(
-    `insert into oauth_handshakes (state, provider, purpose, fan_id, expires_at)
-     values ($1, $2, $3, $4, now() + make_interval(mins => $5))`,
-    [state, input.provider.name, input.purpose, input.fanId, HANDSHAKE_TTL_MINUTES],
+    `insert into oauth_handshakes (state, provider, purpose, fan_id, terms_version, expires_at)
+     values ($1, $2, $3, $4, $5, now() + make_interval(mins => $6))`,
+    [
+      state,
+      input.provider.name,
+      input.purpose,
+      input.fanId,
+      input.termsVersion,
+      HANDSHAKE_TTL_MINUTES,
+    ],
   )
 
   return {
@@ -110,11 +136,12 @@ export async function consumeHandshake(
     provider: ProviderName
     purpose: HandshakePurpose
     fan_id: string | null
+    terms_version: string | null
     live: boolean
   }>(
     `delete from oauth_handshakes
       where state = $1 and provider = $2
-      returning provider, purpose, fan_id, expires_at > now() as live`,
+      returning provider, purpose, fan_id, terms_version, expires_at > now() as live`,
     [input.state, input.provider],
   )
 
@@ -125,7 +152,17 @@ export async function consumeHandshake(
     // The table's `link_handshake_has_fan` check makes this true for every link row; the
     // cast states that guarantee for the caller instead of widening the type to include a
     // state the database forbids.
-    return { provider: row.provider, purpose: 'link', fanId: row.fan_id as string }
+    return {
+      provider: row.provider,
+      purpose: 'link',
+      fanId: row.fan_id as string,
+      termsVersion: row.terms_version,
+    }
   }
-  return { provider: row.provider, purpose: 'login', fanId: row.fan_id }
+  return {
+    provider: row.provider,
+    purpose: 'login',
+    fanId: row.fan_id,
+    termsVersion: row.terms_version,
+  }
 }

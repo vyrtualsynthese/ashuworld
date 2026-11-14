@@ -2,11 +2,18 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { Pool } from 'pg'
 import type { GameConfig } from '@ashuworld/gameconfig'
 import type { IdentityProfile } from '@ashuworld/providers'
-import { ensureIdentity, linkIdentity, withTransaction } from '@ashuworld/ledger'
+import {
+  ensureIdentity,
+  linkIdentity,
+  recordTermsAcceptance,
+  touchLastSeen,
+  withTransaction,
+} from '@ashuworld/ledger'
 import type { Env } from '../config.js'
 import { errorBody } from '../errors.js'
 import {
   HANDSHAKE_TTL_MINUTES,
+  TERMS_VERSION_PATTERN,
   consumeHandshake,
   startHandshake,
   type Handshake,
@@ -43,6 +50,8 @@ export interface AuthRouteDeps {
 interface StartQuery {
   purpose?: unknown
   handle?: unknown
+  /** The terms version the browser rendered; required for a login, ignored for a link. */
+  accept?: unknown
 }
 
 interface CallbackQuery {
@@ -53,6 +62,9 @@ interface CallbackQuery {
 const UNKNOWN_PROVIDER = 'that sign-in provider is not configured'
 const HANDSHAKE_INVALID = 'this sign-in link has expired or was already used'
 const UNAUTHENTICATED = 'sign in to continue'
+/** Shown to the fan, so it is in the site's language rather than the logs'. */
+const CONSENT_REQUIRED =
+  'tu dois avoir 15 ans ou plus et accepter les CGU et la politique de confidentialité'
 
 /**
  * The cookie that ties a handshake to the browser that started it.
@@ -155,10 +167,17 @@ type LinkOutcome =
  * both see "unknown" and create two fans: the second waits, then sees the first fan and
  * signs into it. `ensureIdentity` alone does not give that, because it only serialises the
  * identity insert, not the fan lookup that follows.
+ *
+ * `termsVersion` is the document version the browser rendered and the fan accepted. It is
+ * written on the fan's first acceptance only (`recordTermsAcceptance` refuses to overwrite),
+ * so an existing fan who never accepted gets it recorded at this login. The activity
+ * timestamp is refreshed on every sign-in, including one whose acceptance was already on
+ * file, because retention reads it as "still here".
  */
 async function resolveLogin(
   deps: AuthRouteDeps,
   profile: IdentityProfile,
+  termsVersion: string | null,
 ): Promise<LoginOutcome> {
   return withTransaction(deps.pool, async (tx) => {
     const identity = await ensureIdentity(tx, profile)
@@ -191,6 +210,9 @@ async function resolveLogin(
       }
       fanId = fan.id
     }
+
+    if (termsVersion !== null) await recordTermsAcceptance(tx, fanId, termsVersion)
+    await touchLastSeen(tx, fanId)
 
     return { kind: 'session', sessionId: await createSession(tx, fanId) }
   })
@@ -272,6 +294,18 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         return reply.code(400).send(errorBody('invalid_purpose', 'purpose must be "login" or "link"'))
       }
 
+      // The gate sits before the handshake is written: a caller who did not accept gets
+      // no state, no cookie and, on the callback, no fan. `link` starts from a fan that is
+      // already signed in — their acceptance happened at that login — so it records none.
+      let termsVersion: string | null = null
+      if (purpose === 'login') {
+        const accepted = text(request.query.accept)
+        if (accepted === undefined || !TERMS_VERSION_PATTERN.test(accepted)) {
+          return reply.code(400).send(errorBody('consent_required', CONSENT_REQUIRED))
+        }
+        termsVersion = accepted
+      }
+
       // `requireSession` above guarantees a fan for `link`; `authenticatedFanId` turns a
       // wiring mistake into a loud failure rather than a handshake with no owner.
       const fanId = purpose === 'link' ? authenticatedFanId(request) : null
@@ -280,6 +314,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
           provider,
           purpose,
           fanId,
+          termsVersion,
           redirectUri: callbackUri(deps.env, provider.name),
           loginHint: text(request.query.handle),
         }),
@@ -371,7 +406,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         }
       }
 
-      const outcome = await resolveLogin(deps, profile)
+      const outcome = await resolveLogin(deps, profile, handshake.termsVersion)
       if (outcome.kind === 'reattach') {
         // The identity is detached but was once attached. Signing in would silently undo
         // the fan's own detach; ask them to confirm by starting a link handshake instead.
