@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Pool } from 'pg'
-import { createPool, withTransaction, type Queryable } from '../src/index.js'
+import { attachIdleErrorHandler, createPool, withTransaction, type Queryable } from '../src/index.js'
 import { createTestDb, type TestDb } from './helpers/db.js'
 
 function testDatabaseUrl(): string {
@@ -16,6 +16,33 @@ describe('createPool', () => {
       const { rows } = await pool.query<{ one: number }>('select 1 as one')
       expect(rows[0]?.one).toBe(1)
     } finally {
+      await pool.end()
+    }
+  })
+
+  it('logs a dead idle client instead of letting the error kill the process', async () => {
+    // Emitting 'error' with no listener throws in Node; with the handler it logs once.
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const pool = createPool(testDatabaseUrl())
+    try {
+      expect(() => pool.emit('error', new Error('idle client died'))).not.toThrow()
+      expect(logged).toHaveBeenCalledTimes(1)
+    } finally {
+      logged.mockRestore()
+      await pool.end()
+    }
+  })
+
+  it('can attach the handler to a pool created elsewhere', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const pool = createPool(testDatabaseUrl())
+    // Attaching twice would log twice; the helper relies on attaching exactly once.
+    attachIdleErrorHandler(pool)
+    try {
+      pool.emit('error', new Error('idle client died'))
+      expect(logged).toHaveBeenCalledTimes(2)
+    } finally {
+      logged.mockRestore()
       await pool.end()
     }
   })
@@ -129,6 +156,37 @@ describe('withTransaction', () => {
       }),
     ).rejects.toThrow('boom')
     expect(released).toEqual([true])
+  })
+})
+
+describe('test harness', () => {
+  it('survives an idle-client error on its own pool', async () => {
+    const db = await createTestDb()
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      expect(() => db.pool.emit('error', new Error('idle client died'))).not.toThrow()
+      expect(logged).toHaveBeenCalledTimes(1)
+    } finally {
+      logged.mockRestore()
+      await db.pool.end()
+    }
+  })
+
+  it('only empties its own schema', async () => {
+    const one = await createTestDb()
+    const two = await createTestDb()
+    try {
+      await one.pool.query(`insert into fans (handle, display_name) values ('one', 'One')`)
+      await two.pool.query(`insert into fans (handle, display_name) values ('two', 'Two')`)
+      await one.reset()
+      const { rows: first } = await one.pool.query<{ n: string }>('select count(*)::text as n from fans')
+      const { rows: second } = await two.pool.query<{ n: string }>('select count(*)::text as n from fans')
+      expect(first[0]?.n).toBe('0')
+      expect(second[0]?.n).toBe('1')
+    } finally {
+      await one.pool.end()
+      await two.pool.end()
+    }
   })
 })
 
