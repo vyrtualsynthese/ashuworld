@@ -77,6 +77,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // types. Without them, a serializer that reads `request.ip` makes TypeScript resolve
   // the HTTP/2 overload, whose instance type no route or plugin here accepts.
   const app = Fastify<Server, IncomingMessage, ServerResponse>({
+    // Behind the proxy, `request.ip` is only the client if the deployment says the
+    // forwarding header can be trusted. Off by default so a caller cannot choose the
+    // address the log records.
+    trustProxy: env.TRUST_PROXY,
     logger: {
       level: 'info',
       // Fastify logs `req` for every request and again for the response; without this

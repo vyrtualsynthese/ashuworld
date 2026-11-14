@@ -11,6 +11,14 @@ export interface Env {
   SESSION_COOKIE_NAME: string
   COOKIE_SECURE: boolean
   ALLOW_DEV_LOGIN: boolean
+  /**
+   * Whether `X-Forwarded-For` may decide `request.ip`.
+   *
+   * Off by default: trusting the header without a proxy in front lets any caller choose
+   * the address in the log. A deployment behind a reverse proxy or a Kubernetes ingress
+   * must set `TRUST_PROXY=true`, or every request is logged with the proxy's address.
+   */
+  TRUST_PROXY: boolean
   PUBLIC_BASE_URL: string
   PORT: number
 }
@@ -76,6 +84,7 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
         : sessionCookieName,
     COOKIE_SECURE: flag(raw, 'COOKIE_SECURE', publicBaseUrl.toLowerCase().startsWith('https://')),
     ALLOW_DEV_LOGIN: flag(raw, 'ALLOW_DEV_LOGIN', false),
+    TRUST_PROXY: flag(raw, 'TRUST_PROXY', false),
     PUBLIC_BASE_URL: publicBaseUrl,
     PORT: port(raw),
   }
