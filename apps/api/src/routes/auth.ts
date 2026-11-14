@@ -50,9 +50,10 @@ export interface AuthRouteDeps {
   cfg: GameConfig
   env: Env
   /**
-   * The providers this deployment accepts. Production leaves it unset and the registry
-   * is built from `env`; a test supplies one to inspect what the routes hand a provider,
-   * and a real provider registry can be injected the same way.
+   * The providers this deployment accepts. `buildServer` always passes the instance-wide
+   * registry, so the sign-in routes and the capability route agree on what is open. The
+   * fallback below remains for a caller that registers these routes on its own, and a
+   * test supplies one to inspect what the routes hand a provider.
    */
   providers?: ProviderRegistry
 }

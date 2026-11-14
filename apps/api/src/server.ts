@@ -13,7 +13,7 @@ import { AwardConflictError, HandleTakenError, PenaltyError } from '@ashuworld/l
 import type { Env } from './config.js'
 import { errorBody, notFoundBody } from './errors.js'
 import { HandleExhaustedError } from './auth/handles.js'
-import type { ProviderRegistry } from './auth/providers.js'
+import { createProviderRegistry, type ProviderRegistry } from './auth/providers.js'
 import { registerAuthRoutes } from './routes/auth.js'
 import { registerHealthRoutes } from './routes/health.js'
 import { registerIdentityRoutes } from './routes/identities.js'
@@ -205,6 +205,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return reply.code(404).send(notFoundBody())
   })
 
+  // One registry for the whole instance. The capability route advertises exactly the
+  // doors the sign-in routes will accept, so the page cannot offer a button whose target
+  // answers `unknown_provider`. Building it once also means a test that injects a
+  // registry sees that same registry from both surfaces.
+  const providers = deps.providers ?? createProviderRegistry(env)
+
   // The limiter reads each route's `config.rateLimit` from an `onRoute` hook that only
   // exists once the plugin has loaded. A plugin registered here loads at boot, while a
   // route added directly in this function is added immediately, so declaring the routes
@@ -216,15 +222,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // global public budget.
   app.after(() => {
     registerHealthRoutes(app, pool)
-    registerPublicRoutes(app, { pool, cfg })
+    registerPublicRoutes(app, { pool, cfg, providers })
     registerMeRoutes(app, { pool, env })
     registerIdentityRoutes(app, { pool, cfg, env })
-    registerAuthRoutes(app, {
-      pool,
-      cfg,
-      env,
-      ...(deps.providers === undefined ? {} : { providers: deps.providers }),
-    })
+    registerAuthRoutes(app, { pool, cfg, env, providers })
   })
   return app
 }

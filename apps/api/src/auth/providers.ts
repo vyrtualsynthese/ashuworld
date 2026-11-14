@@ -55,7 +55,22 @@ export function createDevProvider(): OAuthProvider {
 /** What the routes look a provider up in. Unknown names answer `undefined`. */
 export interface ProviderRegistry {
   get(name: string): OAuthProvider | undefined
+  /**
+   * The configured provider names, in the order the capability route lists them.
+   *
+   * The order is a decision, not an accident of the map: it is what the sign-in page
+   * renders, so it stays the same on every deployment and in every test run.
+   */
+  names(): ProviderName[]
 }
+
+/**
+ * The fixed order the capability route lists providers in.
+ *
+ * Twitch leads because it is the platform the campaign runs on. `dev` is last and
+ * conditional: it is a backdoor, and it must never look like the recommended door.
+ */
+const LISTED_PROVIDERS: readonly ProviderName[] = ['twitch', 'discord', 'youtube', 'dev']
 
 /**
  * The environment the registry reads. A `Pick` rather than the whole `Env` so a test can
@@ -102,6 +117,11 @@ export function createProviderRegistry(env: ProviderEnv): ProviderRegistry {
     get(name: string): OAuthProvider | undefined {
       if (!isProviderName(name)) return undefined
       return providers.get(name)
+    },
+    // Derived from `LISTED_PROVIDERS` rather than from the map's insertion order, so
+    // configuring a provider in another order cannot reorder the page's buttons.
+    names(): ProviderName[] {
+      return LISTED_PROVIDERS.filter((name) => providers.has(name))
     },
   }
 }
