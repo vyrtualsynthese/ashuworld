@@ -1,0 +1,56 @@
+name: Feature request
+description: A rule, a reward, or a view that AshuWorld should have.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        AshuWorld rewards engagement without ever taking a level away. If your idea needs one of
+        the rules in [CONTRIBUTING.md](https://github.com/vyrtualsynthese/ashuworld/blob/main/CONTRIBUTING.md)
+        relaxed, say which and why — that is the most useful part of the request.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is missing or annoying today
+      description: Describe the fan's experience, not the implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like instead
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of change is this
+      options:
+        - A new way to earn XP
+        - A change to levels or the curve
+        - A new place to show the level
+        - Account or sign-in behaviour
+        - Operator tooling
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: abuse
+    attributes:
+      label: How could this be gamed
+      description: |
+        Any public number invites farming. If this reward can be earned, farmed, or duplicated,
+        what stops it? "I do not know" is a fine answer, and a useful one.
+
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Rules
+      options:
+        - label: This does not require taking XP or a level away from a fan.
+          required: true

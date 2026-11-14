@@ -1,0 +1,59 @@
+name: Bug report
+description: Something behaves differently from what the design says it should.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you file: is this a security issue? Those go through the private channel in
+        [SECURITY.md](https://github.com/vyrtualsynthese/ashuworld/blob/main/SECURITY.md), never a
+        public issue. If a fan's level, XP, or account data is affected, treat it as security.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. docker compose up --build
+        2. sign in with the dev provider as "ashu"
+        3. open the account page and detach the account
+        4. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where
+      options:
+        - XP, levels or the ledger
+        - Sign-in, linking or detaching
+        - Public ladder or profile
+        - Web app
+        - Worker or event delivery
+        - Deployment, chart or images
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit or version
+      description: The SHA, tag, or image tag you ran.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: "Redact sessions, provider account ids and anything you would not post publicly."
+      render: shell
