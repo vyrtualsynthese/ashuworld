@@ -16,6 +16,20 @@ export type PenaltyErrorCode =
   | 'invalid_reason'
 
 /**
+ * The largest amount one punishment may take, as a positive number of xp.
+ *
+ * The ledger stores balances as 32-bit integers, and the balance query sums them with
+ * `sum(...)::int`. An uncapped `Number.MIN_SAFE_INTEGER` passes `Number.isInteger` and
+ * would reach Postgres as a value out of range for `integer`; even two large but in-range
+ * penalties could overflow the sum. 100,000 is 66 times the highest level threshold
+ * (1,500) and 1,333 times the largest action (75), so it does not limit a real
+ * punishment, while keeping one row far below the 2,147,483,647 ceiling. It bounds one
+ * row, not the running sum; a fan would have to collect more than 21,000 maximum
+ * punishments before the sum itself gets close.
+ */
+export const MAX_PENALTY_XP = 100_000
+
+/**
  * A punishment the ledger would not write, with a message in plain words.
  *
  * The database has its own checks — `amount` is an integer, a penalty needs a reason — but
@@ -100,10 +114,14 @@ export async function addPenalty(
     )
   }
 
-  if (!Number.isInteger(input.amount) || input.amount >= 0) {
+  if (
+    !Number.isInteger(input.amount) ||
+    input.amount >= 0 ||
+    input.amount < -MAX_PENALTY_XP
+  ) {
     throw new PenaltyError(
       'invalid_amount',
-      `a punishment must lower the balance, so amount must be a negative whole number of xp; got ${String(input.amount)}`,
+      `a punishment must lower the balance by between 1 and ${MAX_PENALTY_XP} xp, as a whole number; got ${String(input.amount)}`,
     )
   }
 
@@ -132,11 +150,13 @@ export async function addPenalty(
   }
 
   // The punishment and its actor are already on the entry; this is the operator-facing
-  // trail the design asks for, next to link and detach.
+  // trail the design asks for, next to link and detach. `entryId` is repeated here so two
+  // identical punishments can be told apart without going back to the ledger.
   await tx.query(
     `insert into audit_log (kind, fan_id, identity_id, actor_fan_id, detail)
-     values ('penalty', $1, null, $2, jsonb_build_object('amount', $3::int, 'reason', $4::text))`,
-    [input.fanId, input.actorFanId, input.amount, reason],
+     values ('penalty', $1, null, $2,
+             jsonb_build_object('entryId', $3::uuid, 'amount', $4::int, 'reason', $5::text))`,
+    [input.fanId, input.actorFanId, inserted.id, input.amount, reason],
   )
 
   await recomputeStanding(tx, input.fanId, input.cfg)

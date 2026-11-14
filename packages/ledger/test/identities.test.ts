@@ -157,7 +157,7 @@ describe('identities', () => {
     provider: ProviderName = 'twitch',
   ): Promise<void> {
     const result = await withTransaction(db.pool, (tx) =>
-      awardOnce(tx, { identityId, provider, actionKey, amount, idempotencyKey }),
+      awardOnce(tx, { identityId, provider, actionKey, amount, idempotencyKey, cfg }),
     )
     expect(result.awarded).toBe(true)
   }
@@ -648,6 +648,7 @@ describe('identities', () => {
           actionKey: 'twitch.follow',
           amount: 50,
           idempotencyKey: 'follow-1',
+          cfg,
         }),
       )
       expect(replay).toMatchObject({ awarded: false, reason: 'action_spent' })
