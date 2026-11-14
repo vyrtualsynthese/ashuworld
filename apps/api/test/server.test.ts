@@ -44,6 +44,7 @@ function testEnv(overrides: Partial<Env> = {}): Env {
     ALLOW_DEV_LOGIN: false,
     TRUST_PROXY: false,
     PUBLIC_BASE_URL: 'http://localhost:3000',
+    ERASURE_PEPPER: 'test-pepper',
     PORT: 3000,
     RATE_LIMIT_ENABLED: false,
     RATE_LIMIT_WINDOW_MS: 60_000,
@@ -144,6 +145,7 @@ describe('loadEnv', () => {
   const required = {
     DATABASE_URL: 'postgres://ashu:ashu@localhost:5432/ashu',
     PUBLIC_BASE_URL: 'https://ashu.example',
+    ERASURE_PEPPER: 'test-pepper',
   }
 
   it('refuses to start without DATABASE_URL', () => {
@@ -157,6 +159,7 @@ describe('loadEnv', () => {
   it('treats a blank required variable as missing', () => {
     expect(() => loadEnv({ ...required, DATABASE_URL: '   ' })).toThrow(/DATABASE_URL/)
     expect(() => loadEnv({ ...required, PUBLIC_BASE_URL: '' })).toThrow(/PUBLIC_BASE_URL/)
+    expect(() => loadEnv({ ...required, ERASURE_PEPPER: '  ' })).toThrow(/ERASURE_PEPPER/)
   })
 
   it('fills the documented defaults, deriving Secure from an https base URL', () => {
@@ -250,10 +253,12 @@ describe('loadEnv', () => {
       loadEnv({
         DATABASE_URL: '  postgres://ashu:ashu@localhost:5432/ashu  ',
         PUBLIC_BASE_URL: ' https://ashu.example ',
+        ERASURE_PEPPER: '  test-pepper  ',
       }),
     ).toMatchObject({
       DATABASE_URL: 'postgres://ashu:ashu@localhost:5432/ashu',
       PUBLIC_BASE_URL: 'https://ashu.example',
+      ERASURE_PEPPER: 'test-pepper',
     })
   })
 

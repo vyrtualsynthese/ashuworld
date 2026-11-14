@@ -1,10 +1,10 @@
 /**
  * The process configuration the api reads at startup.
  *
- * Everything that has a safe default does; `DATABASE_URL` and `PUBLIC_BASE_URL` do not,
- * because a service that starts without them is misconfigured in a way no later request
- * can repair. The values are parsed once, outside `buildServer`, so tests can hand the
- * server a plain object and never touch `process.env`.
+ * Everything that has a safe default does; `DATABASE_URL`, `PUBLIC_BASE_URL` and
+ * `ERASURE_PEPPER` do not, because a service that starts without them is misconfigured in
+ * a way no later request can repair. The values are parsed once, outside `buildServer`, so
+ * tests can hand the server a plain object and never touch `process.env`.
  */
 export interface Env {
   DATABASE_URL: string
@@ -20,6 +20,14 @@ export interface Env {
    */
   TRUST_PROXY: boolean
   PUBLIC_BASE_URL: string
+  /**
+   * The server-side secret that lets the api recognise an erased account without keeping
+   * its identifier. Required rather than defaulted: a random default would silently stop
+   * matching the values written before a restart, and an empty pepper would make the
+   * derived marker guessable. Erasure itself is a separate tool; the api only needs the
+   * value to be configured.
+   */
+  ERASURE_PEPPER: string
   PORT: number
   /** Whether the rate limiter runs at all. Off in tests, on everywhere else. */
   RATE_LIMIT_ENABLED: boolean
@@ -128,6 +136,7 @@ function logLevel(raw: NodeJS.ProcessEnv): LogLevel {
 export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
   const databaseUrl = required(raw, 'DATABASE_URL')
   const publicBaseUrl = required(raw, 'PUBLIC_BASE_URL')
+  const erasurePepper = required(raw, 'ERASURE_PEPPER')
   const sessionCookieName = raw['SESSION_COOKIE_NAME']
 
   return {
@@ -140,6 +149,7 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
     ALLOW_DEV_LOGIN: flag(raw, 'ALLOW_DEV_LOGIN', false),
     TRUST_PROXY: flag(raw, 'TRUST_PROXY', false),
     PUBLIC_BASE_URL: publicBaseUrl,
+    ERASURE_PEPPER: erasurePepper,
     PORT: port(raw),
     RATE_LIMIT_ENABLED: flag(raw, 'RATE_LIMIT_ENABLED', true),
     RATE_LIMIT_WINDOW_MS: positiveInteger(

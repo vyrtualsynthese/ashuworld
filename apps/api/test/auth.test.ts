@@ -55,6 +55,7 @@ function testEnv(overrides: Partial<Env> = {}): Env {
     ALLOW_DEV_LOGIN: true,
     TRUST_PROXY: false,
     PUBLIC_BASE_URL: 'http://localhost:3000',
+    ERASURE_PEPPER: 'test-pepper',
     PORT: 3000,
     RATE_LIMIT_ENABLED: false,
     RATE_LIMIT_WINDOW_MS: 60_000,
@@ -154,10 +155,26 @@ function cookieHeader(sessionId: string): { cookie: string } {
 
 async function startDev(
   app: FastifyInstance,
-  options: { purpose?: string; handle?: string; cookie?: string } = {},
+  options: {
+    purpose?: string
+    handle?: string
+    cookie?: string
+    /**
+     * The terms version to send. A login defaults to today's document, because every
+     * login now requires one and the older cases are about handshakes rather than
+     * consent; `null` sends none, which is the "did not accept" request.
+     */
+    accept?: string | null
+  } = {},
 ): Promise<Injected> {
-  const query = new URLSearchParams({ purpose: options.purpose ?? 'login' })
+  const purpose = options.purpose ?? 'login'
+  const query = new URLSearchParams({ purpose })
   if (options.handle !== undefined) query.set('handle', options.handle)
+  // A login always names the document the browser rendered; `null` is the explicit "sent
+  // none". A link runs behind a session whose fan accepted at sign-in, so it sends nothing.
+  const accept =
+    options.accept === undefined && purpose === 'login' ? '2026-11-14' : options.accept
+  if (accept !== undefined && accept !== null) query.set('accept', accept)
   return app.inject({
     method: 'GET',
     url: `/auth/dev/start?${query.toString()}`,
@@ -167,7 +184,12 @@ async function startDev(
 
 async function newState(
   app: FastifyInstance,
-  options: { handle?: string; purpose?: string; cookie?: string } = {},
+  options: {
+    handle?: string
+    purpose?: string
+    cookie?: string
+    accept?: string | null
+  } = {},
 ): Promise<string> {
   const res = await startDev(app, options)
   if (res.statusCode !== 302) {
@@ -212,8 +234,9 @@ async function callback(
 async function login(
   app: FastifyInstance,
   code = 'ashu',
+  options: { accept?: string | null } = {},
 ): Promise<{ cookie: string; res: Injected }> {
-  const state = await newState(app, { handle: code })
+  const state = await newState(app, { handle: code, ...options })
   const res = await callback(app, { state, code })
   return { cookie: sessionCookieOf(res), res }
 }
@@ -270,6 +293,25 @@ async function seedTwitchIdentity(fanId: string): Promise<string> {
     const linked = await linkIdentity(tx, { fanId, identityId: identity.id, cfg })
     if (!linked.ok) throw new Error(`seeding failed: ${linked.reason}`)
     return identity.id
+  })
+}
+
+/**
+ * Attaches the dev identity a login for `handle` would resolve to, to an existing fan.
+ *
+ * This is the fan the gate meets on a second visit: already known, possibly with no
+ * acceptance recorded because they signed in before the terms existed.
+ */
+async function seedDevIdentity(fanId: string, handle: string): Promise<void> {
+  await withTransaction(db.pool, async (tx) => {
+    const identity = await ensureIdentity(tx, {
+      provider: 'dev',
+      externalId: `dev:${handle}`,
+      displayHandle: handle,
+      displayName: handle,
+    })
+    const linked = await linkIdentity(tx, { fanId, identityId: identity.id, cfg })
+    if (!linked.ok) throw new Error(`seeding failed: ${linked.reason}`)
   })
 }
 
@@ -346,7 +388,7 @@ describe('GET /auth/:provider/start', () => {
     await withApp(async (app) => {
       const res = await app.inject({
         method: 'GET',
-        url: '/auth/dev/start?purpose=login',
+        url: '/auth/dev/start?purpose=login&accept=2026-11-14',
         headers: { host: 'evil.example' },
       })
 
@@ -464,7 +506,13 @@ describe('handshake storage', () => {
         consumeHandshake(tx, { state, provider: 'dev' }),
       )
 
-      expect(first).toEqual({ provider: 'dev', purpose: 'login', fanId: null })
+      expect(first).toEqual({
+        provider: 'dev',
+        purpose: 'login',
+        fanId: null,
+        // The start helper sends the current terms version, so the handshake remembers it.
+        termsVersion: '2026-11-14',
+      })
       expect(second).toBeNull()
       expect(await count('oauth_handshakes')).toBe(0)
     })
@@ -475,7 +523,13 @@ describe('handshake storage', () => {
 
     await withApp(async () => {
       const { state } = await withTransaction(db.pool, (tx) =>
-        startHandshake(tx, { provider: dev, purpose: 'login', fanId: null, redirectUri: REDIRECT_URI }),
+        startHandshake(tx, {
+          provider: dev,
+          purpose: 'login',
+          fanId: null,
+          termsVersion: null,
+          redirectUri: REDIRECT_URI,
+        }),
       )
 
       const crossed = await withTransaction(db.pool, (tx) =>
@@ -486,7 +540,12 @@ describe('handshake storage', () => {
       const right = await withTransaction(db.pool, (tx) =>
         consumeHandshake(tx, { state, provider: 'dev' }),
       )
-      expect(right).toEqual({ provider: 'dev', purpose: 'login', fanId: null })
+      expect(right).toEqual({
+        provider: 'dev',
+        purpose: 'login',
+        fanId: null,
+        termsVersion: null,
+      })
     })
   })
 
@@ -495,7 +554,13 @@ describe('handshake storage', () => {
 
     await withApp(async () => {
       const { state } = await withTransaction(db.pool, (tx) =>
-        startHandshake(tx, { provider: dev, purpose: 'login', fanId: null, redirectUri: REDIRECT_URI }),
+        startHandshake(tx, {
+          provider: dev,
+          purpose: 'login',
+          fanId: null,
+          termsVersion: null,
+          redirectUri: REDIRECT_URI,
+        }),
       )
       const { rows } = await db.pool.query<{ ttl: number }>(
         `select extract(epoch from expires_at - created_at)::int as ttl
@@ -539,7 +604,13 @@ describe('handshake storage', () => {
 
     await expect(
       withTransaction(db.pool, (tx) =>
-        startHandshake(tx, { provider: dev, purpose: 'link', fanId: null, redirectUri: REDIRECT_URI }),
+        startHandshake(tx, {
+          provider: dev,
+          purpose: 'link',
+          fanId: null,
+          termsVersion: null,
+          redirectUri: REDIRECT_URI,
+        }),
       ),
     ).rejects.toThrow(/needs a signed-in fan/)
     expect(await count('oauth_handshakes')).toBe(0)
@@ -776,6 +847,69 @@ describe('GET /auth/:provider/callback: login', () => {
       // Only the session from before the detach still exists.
       expect(await count('sessions')).toBe(1)
       expect(first.res.statusCode).toBe(302)
+    })
+  })
+})
+
+describe('consent at sign-in', () => {
+  it('refuses a login with no acceptance and writes no handshake', async () => {
+    await withApp(async (app) => {
+      const before = await count('fans')
+
+      const res = await startDev(app, { handle: 'ada', accept: null })
+
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toEqual({
+        error: {
+          code: 'consent_required',
+          message:
+            'tu dois avoir 15 ans ou plus et accepter les CGU et la politique de confidentialité',
+        },
+      })
+      expect(cookiesOf(res)).toEqual([])
+      expect(await count('fans')).toBe(before)
+      expect(await count('oauth_handshakes')).toBe(0)
+      expect(await count('sessions')).toBe(0)
+    })
+  })
+
+  it('records the version and timestamp when the fan is created', async () => {
+    await withApp(async (app) => {
+      const { res } = await login(app, 'ada')
+
+      expect(res.statusCode).toBe(302)
+      const { rows } = await db.pool.query<{
+        terms_version: string | null
+        terms_accepted_at: Date | null
+        last_seen_at: Date | null
+      }>(
+        'select terms_version, terms_accepted_at, last_seen_at from fans where handle = $1',
+        ['ada'],
+      )
+      expect(rows[0]?.terms_version).toBe('2026-11-14')
+      expect(rows[0]?.terms_accepted_at).toBeInstanceOf(Date)
+      // The activity timestamp the retention sweep reads is refreshed on the same login.
+      expect(rows[0]?.last_seen_at).toBeInstanceOf(Date)
+    })
+  })
+
+  it('records the first acceptance for an existing fan and never overwrites it', async () => {
+    await withApp(async (app) => {
+      const fanId = await seedFan('ada')
+      await seedDevIdentity(fanId, 'ada')
+
+      const first = await login(app, 'ada')
+      const second = await login(app, 'ada', { accept: '2027-01-01' })
+
+      // The second login names a later document; the first acceptance stays on file.
+      expect(first.res.statusCode).toBe(302)
+      expect(second.res.statusCode).toBe(302)
+      const { rows } = await db.pool.query<{ terms_version: string | null }>(
+        'select terms_version from fans where id = $1',
+        [fanId],
+      )
+      expect(rows[0]?.terms_version).toBe('2026-11-14')
+      expect(await count('fans')).toBe(1)
     })
   })
 })

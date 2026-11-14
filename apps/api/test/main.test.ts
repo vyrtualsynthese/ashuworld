@@ -23,6 +23,7 @@ const cfg: GameConfig = {
 const env = loadEnv({
   DATABASE_URL: 'postgres://ashu:ashu@localhost:5432/ashu',
   PUBLIC_BASE_URL: 'https://ashu.example',
+  ERASURE_PEPPER: 'test-pepper',
 })
 
 /** A pool that records `end` and never opens a connection. */
