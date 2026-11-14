@@ -8,7 +8,6 @@ export interface ErrorEnvelope {
 
 /** One fan account on the public ladder. */
 export interface LadderFan {
-  fanId: string
   handle: string
   level: number
   balance: number

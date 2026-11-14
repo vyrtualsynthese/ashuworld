@@ -127,8 +127,9 @@ describe('GET /api/public/ladder', () => {
       const res = await app.inject({ method: 'GET', url: '/api/public/ladder' })
 
       expect(res.statusCode).toBe(200)
+      expect(res.json().linked[0]).not.toHaveProperty('fanId')
       expect(res.json()).toEqual({
-        linked: [{ fanId, handle: 'ashu', level: 1, balance: 150 }],
+        linked: [{ handle: 'ashu', level: 1, balance: 150 }],
         freeStanding: [],
       })
       expect(res.headers['set-cookie']).toBeUndefined()
@@ -152,7 +153,7 @@ describe('GET /api/public/ladder', () => {
 
       expect(res.statusCode).toBe(200)
       expect(res.json()).toEqual({
-        linked: [{ fanId, handle: 'ashu', level: 0, balance: 50 }],
+        linked: [{ handle: 'ashu', level: 0, balance: 50 }],
         freeStanding: [
           {
             identityId: unclaimed,
