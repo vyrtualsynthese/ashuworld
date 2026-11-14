@@ -1,0 +1,107 @@
+import { Link, useParams } from 'react-router-dom'
+import { ApiError, fetchFan, type PublicFan } from '../api'
+import { LevelBadge } from '../components/LevelBadge'
+import { formatNumber } from '../format'
+import { providerLabel } from '../providers'
+import { useResource } from '../useResource'
+
+/** The public profile, once it is here. */
+function ProfileBody({ fan }: { fan: PublicFan }) {
+  return (
+    <>
+      <header className="profile-header">
+        <h1>{fan.displayName}</h1>
+        <p className="handle">
+          @<span>{fan.handle}</span>
+        </p>
+        <LevelBadge level={fan.level} />
+      </header>
+
+      <dl className="standing">
+        <div>
+          <dt>XP to spend</dt>
+          <dd>{formatNumber(fan.balance)}</dd>
+        </div>
+        <div>
+          <dt>Peak XP</dt>
+          <dd>{formatNumber(fan.peakXp)}</dd>
+        </div>
+      </dl>
+
+      <section aria-labelledby="providers-heading">
+        <h2 id="providers-heading">Attached accounts</h2>
+        {fan.identities.length === 0 ? (
+          <p className="muted">No provider account is attached to this fan account.</p>
+        ) : (
+          <ul className="identity-list">
+            {fan.identities.map((identity) => (
+              <li key={`${identity.provider}:${identity.displayHandle}`}>
+                <span className="provider">{providerLabel(identity.provider)}</span>
+                <span className="handle">@{identity.displayHandle}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
+  )
+}
+
+/**
+ * A public profile: the level, what the fan can spend, what they reached, and the accounts
+ * behind the total.
+ *
+ * An unknown handle is a page, not an error. The api answers 404 with the same body as a
+ * route that does not exist, so anything else shown here would turn a mistyped link into a
+ * crash or a hint about who has an account. The 404 branch is why `ApiError` carries the
+ * status: the page decides, not a string match on a message.
+ */
+export function Profile() {
+  const { handle = '' } = useParams<{ handle: string }>()
+  const { resource, reload } = useResource(() => fetchFan(handle), [handle])
+
+  if (resource.state === 'loading') {
+    return (
+      <main className="page">
+        <h1>Profile</h1>
+        <p className="muted">Loading this fan…</p>
+      </main>
+    )
+  }
+
+  if (resource.state === 'error' && resource.error instanceof ApiError && resource.error.status === 404) {
+    return (
+      <main className="page">
+        <h1>No such fan</h1>
+        <p>
+          There is no fan called @{handle} on AshuWorld. The handle may be misspelled, or
+          this fan may not have joined yet.
+        </p>
+        <Link className="button" to="/ladder">
+          Back to the ladder
+        </Link>
+      </main>
+    )
+  }
+
+  if (resource.state === 'error') {
+    return (
+      <main className="page">
+        <h1>Profile</h1>
+        <section className="panel panel-error" aria-labelledby="profile-error-heading">
+          <h2 id="profile-error-heading">This profile could not be loaded</h2>
+          <p>The server did not answer, so there is nothing to show for @{handle} yet.</p>
+          <button type="button" onClick={reload}>
+            Try again
+          </button>
+        </section>
+      </main>
+    )
+  }
+
+  return (
+    <main className="page">
+      <ProfileBody fan={resource.data} />
+    </main>
+  )
+}
