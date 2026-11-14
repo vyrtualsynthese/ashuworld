@@ -33,3 +33,9 @@ create index fans_inactive on fans ((coalesce(last_seen_at, created_at)))
 -- shrinks as identities are linked instead of growing with every sign-in.
 create index provider_identities_never_linked on provider_identities (created_at)
   where first_linked_at is null;
+
+-- The retention sweep deletes processed events and audit rows by age alone, several times a
+-- day. Without these, each deletion walks both tables in full; the event index is partial so
+-- it only carries rows that can ever age out.
+create index audit_log_created_at on audit_log (created_at);
+create index inbound_events_processed on inbound_events (received_at) where processed_at is not null;

@@ -135,6 +135,27 @@ describe('schema', () => {
     expect(neverLinked).toMatch(/where \(first_linked_at is null\)/i)
   })
 
+  // The purge deletes by age, not by owner: `created_at` for audit rows and `received_at`
+  // for events, both older than a cutoff. The event index is partial because an unprocessed
+  // event is never a deletion candidate.
+  it('indexes the purge cutoffs on audit rows and processed events', async () => {
+    const { rows } = await db.pool.query<{ indexname: string; indexdef: string }>(
+      `select indexname, indexdef from pg_indexes
+        where schemaname = current_schema()
+          and indexname in ('audit_log_created_at', 'inbound_events_processed')
+        order by indexname`,
+    )
+    expect(rows.map((r) => r.indexname)).toEqual([
+      'audit_log_created_at',
+      'inbound_events_processed',
+    ])
+    const defs = new Map(rows.map((r) => [r.indexname, r.indexdef]))
+    expect(defs.get('audit_log_created_at') ?? '').toContain('(created_at)')
+    const processed = defs.get('inbound_events_processed') ?? ''
+    expect(processed).toContain('(received_at)')
+    expect(processed).toMatch(/where \(processed_at is not null\)/i)
+  })
+
   it('refuses a handshake purpose that is neither login nor link', async () => {
     await expect(
       db.pool.query(

@@ -1,8 +1,9 @@
-import { createHmac } from 'node:crypto'
+import { createHmac, randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { GameConfig } from '@ashuworld/gameconfig'
 import type { ProviderName } from '@ashuworld/providers'
 import {
+  FanNotFoundError,
   IdentityAttachedError,
   IdentityNotFoundError,
   awardOnce,
@@ -26,6 +27,8 @@ const cfg: GameConfig = {
   version: 'test',
   actions: {
     'twitch.follow': { amount: 50, provider: 'twitch' },
+    // A second twitch action, so a test can pay an identity twice without reusing a key.
+    'twitch.raid': { amount: 50, provider: 'twitch' },
     'youtube.subscribe': { amount: 100, provider: 'youtube' },
   },
   levels: [
@@ -113,15 +116,16 @@ describe('privacy', () => {
 
     const result = await withTransaction(db.pool, (tx) => eraseFan(tx, { fanId, pepper }))
 
-    expect(result).toEqual({ identities: 1, forfeitedEntries: 1 })
+    expect(result).toEqual({ erased: true, identities: 1, forfeitedEntries: 1 })
 
     const { rows: fans } = await db.pool.query<{
       handle: string
       display_name: string
       erased_at: Date | null
     }>('select handle, display_name, erased_at from fans where id = $1', [fanId])
-    expect(fans[0]?.handle).toMatch(/^deleted_[0-9a-f]{16}$/)
-    expect(fans[0]?.handle).toHaveLength(24)
+    const handle = fans[0]?.handle ?? ''
+    expect(handle).toMatch(/^deleted_[0-9a-f]{16}$/)
+    expect(handle).toHaveLength(24)
     expect(fans[0]?.display_name).toBe('Compte supprimé')
     expect(fans[0]?.erased_at).toBeInstanceOf(Date)
 
@@ -139,15 +143,37 @@ describe('privacy', () => {
     expect(entries[0]?.fan_id).toBeNull()
     expect(entries[0]?.identity_id).toBe(identityId)
     expect(entries[0]?.forfeited_at).toBeInstanceOf(Date)
+
+    // A retry does nothing: same handle, no second audit row, nothing re-anonymised.
+    const retry = await withTransaction(db.pool, (tx) => eraseFan(tx, { fanId, pepper }))
+    expect(retry).toEqual({ erased: false, identities: 0, forfeitedEntries: 0 })
+
+    const { rows: again } = await db.pool.query<{ handle: string }>(
+      'select handle from fans where id = $1',
+      [fanId],
+    )
+    expect(again[0]?.handle).toBe(handle)
+
+    const { rows: audit } = await db.pool.query<{ n: string }>(
+      `select count(*)::text as n from audit_log where kind = 'erase'`,
+    )
+    expect(audit[0]?.n).toBe('1')
   })
 
-  it('keeps the one-time key: re-linking the erased identity pays nothing', async () => {
+  it('refuses an account id that is not in the table', async () => {
+    await expect(
+      withTransaction(db.pool, (tx) => eraseFan(tx, { fanId: randomUUID(), pepper })),
+    ).rejects.toBeInstanceOf(FanNotFoundError)
+  })
+
+  it('keeps the one-time key: re-attaching the erased identity row by id pays nothing', async () => {
     const { fanId, identityId } = await seedAccount()
 
     await withTransaction(db.pool, (tx) => eraseFan(tx, { fanId, pepper }))
 
-    // The identity is nobody's now, so a fresh account can claim it. The follow it was
-    // already paid for must stay spent: the entry survived the erasure, forfeited.
+    // The identity is nobody's now, so a fresh account can claim it. It is claimed by id,
+    // because the sign-in resolver that reads the peppered hash arrives in Task 10. The
+    // follow it was already paid for must stay spent: the entry survived, forfeited.
     const freshFanId = await seedFan('fresh', 'Fresh')
     await link(freshFanId, identityId)
 
@@ -197,14 +223,15 @@ describe('privacy', () => {
     await award(free, 'twitch.follow', 'idem-free')
 
     const result = await withTransaction(db.pool, (tx) => eraseIdentity(tx, { identityId: free, pepper }))
-    expect(result).toEqual({ forfeitedEntries: 1 })
+    expect(result).toEqual({ erased: true, forfeitedEntries: 1 })
 
     const { rows } = await db.pool.query<{
       external_id: string
       display_handle: string
       fan_id: string | null
     }>('select external_id, display_handle, fan_id from provider_identities where id = $1', [free])
-    expect(rows[0]?.external_id).toBe(erasedExternalId(pepper, 'twitch', 't-2'))
+    const hashed = erasedExternalId(pepper, 'twitch', 't-2')
+    expect(rows[0]?.external_id).toBe(hashed)
     expect(rows[0]?.display_handle).toBe('Compte supprimé')
     expect(rows[0]?.fan_id).toBeNull()
 
@@ -215,8 +242,37 @@ describe('privacy', () => {
     expect(entries).toHaveLength(1)
     expect(entries[0]?.forfeited_at).toBeInstanceOf(Date)
 
+    // A retry must not hash the hash: the stored value stays what the first call wrote.
+    const retry = await withTransaction(db.pool, (tx) =>
+      eraseIdentity(tx, { identityId: free, pepper }),
+    )
+    expect(retry).toEqual({ erased: false, forfeitedEntries: 0 })
+    const { rows: kept } = await db.pool.query<{ external_id: string }>(
+      'select external_id from provider_identities where id = $1',
+      [free],
+    )
+    expect(kept[0]?.external_id).toBe(hashed)
+
+    // One audit row, counts only: a later erasure of the same row adds none.
+    const { rows: audit } = await db.pool.query<{
+      fan_id: string | null
+      identity_id: string | null
+      actor_fan_id: string | null
+      detail: { forfeitedEntries: number }
+    }>(
+      `select fan_id, identity_id, actor_fan_id, detail
+         from audit_log where kind = 'erase-identity'`,
+    )
+    expect(audit).toHaveLength(1)
+    expect(audit[0]?.detail).toEqual({ forfeitedEntries: 1 })
+    expect(audit[0]?.fan_id).toBeNull()
+    expect(audit[0]?.identity_id).toBeNull()
+    expect(audit[0]?.actor_fan_id).toBeNull()
+
+    // A random uuid rather than an existing fan id: a fan id would only show that the
+    // lookup misses the fans table, not that it misses an identity.
     await expect(
-      withTransaction(db.pool, (tx) => eraseIdentity(tx, { identityId: fanId, pepper })),
+      withTransaction(db.pool, (tx) => eraseIdentity(tx, { identityId: randomUUID(), pepper })),
     ).rejects.toBeInstanceOf(IdentityNotFoundError)
 
     // The attached identity was refused, so it still belongs to its account.
@@ -401,6 +457,27 @@ describe('privacy', () => {
         events: 0,
         audit: 0,
       })
+    })
+
+    it('honours the limit: one account per pass, the rest left for the next', async () => {
+      for (const handle of ['idle_a', 'idle_b', 'idle_c']) {
+        const fanId = await seedFan(handle, handle)
+        await db.pool.query(
+          `update fans set created_at = now() - interval '1200 days' where id = $1`,
+          [fanId],
+        )
+      }
+
+      const result = await purgeBatch(db.pool, { pepper, dryRun: false, limit: 1 })
+      expect(result.fans).toBe(1)
+
+      const { rows } = await db.pool.query<{ erased: string; live: string }>(
+        `select count(*) filter (where erased_at is not null)::text as erased,
+                count(*) filter (where erased_at is null)::text as live
+           from fans`,
+      )
+      expect(rows[0]?.erased).toBe('1')
+      expect(rows[0]?.live).toBe('2')
     })
 
     it('keeps an erased account off the ladder and out of the profile', async () => {
