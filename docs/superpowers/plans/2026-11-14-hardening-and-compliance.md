@@ -735,15 +735,20 @@ create index provider_identities_never_linked on provider_identities (created_at
 
 ```ts
 it('records the acceptance once and never overwrites it', async () => {
-  const fan = await createFan(tx, { handle: 'ada', displayName: 'Ada' })
-  await recordTermsAcceptance(tx, fan.id, '2026-11-14')
-  const first = await tx.query<{ terms_version: string; terms_accepted_at: Date }>(
-    'select terms_version, terms_accepted_at from fans where id = $1', [fan.id],
+  const { id } = await withTransaction(pool, (tx) =>
+    createFan(tx, { handle: 'ada', displayName: 'Ada' }),
   )
-  await recordTermsAcceptance(tx, fan.id, '2027-01-01')
-  const second = await tx.query<{ terms_version: string }>(
-    'select terms_version from fans where id = $1', [fan.id],
+
+  await withTransaction(pool, (tx) => recordTermsAcceptance(tx, id, '2026-11-14'))
+  const first = await pool.query<{ terms_version: string }>(
+    'select terms_version from fans where id = $1', [id],
   )
+
+  await withTransaction(pool, (tx) => recordTermsAcceptance(tx, id, '2027-01-01'))
+  const second = await pool.query<{ terms_version: string }>(
+    'select terms_version from fans where id = $1', [id],
+  )
+
   expect(first.rows[0]?.terms_version).toBe('2026-11-14')
   expect(second.rows[0]?.terms_version).toBe('2026-11-14')
 })
@@ -767,16 +772,10 @@ it('refuses a login with no acceptance and creates no fan', async () => {
 })
 
 it('records the version and timestamp when the fan is created', async () => {
-  const start = await app.inject({
-    method: 'GET',
-    url: '/auth/dev/start?purpose=login&handle=ada&accept=2026-11-14',
-  })
-  const state = new URL(start.headers.location as string).searchParams.get('state')
-  await app.inject({
-    method: 'GET',
-    url: `/auth/dev/callback?code=ada&state=${state}`,
-    headers: { cookie: cookieFrom(start) },
-  })
+  // `startDev`, `stateOf` and `callback` already live in auth.test.ts. Extend `startDev`
+  // with an `accept?: string` option that appends `accept` to the query string.
+  const start = await startDev(app, { handle: 'ada', accept: '2026-11-14' })
+  await callback(app, { state: stateOf(start), code: 'ada' })
   const row = await db.pool.query<{ terms_version: string; terms_accepted_at: Date }>(
     'select terms_version, terms_accepted_at from fans where handle = $1', ['ada'],
   )
