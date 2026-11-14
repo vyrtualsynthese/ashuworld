@@ -399,10 +399,43 @@ describe('Account, signed out', () => {
     expect(
       await screen.findByRole('heading', { name: /se connecter à ashuworld/i }),
     ).toBeInTheDocument()
+    // The control exists from the start, but as a dead button: the gate is the tick.
+    expect(
+      screen.getByRole('button', { name: /se connecter avec le compte de développement/i }),
+    ).toBeDisabled()
+    expect(screen.queryByText(/sign in to continue/i)).not.toBeInTheDocument()
+  })
+
+  it('keeps the sign-in link behind the age and terms tick', async () => {
+    vi.stubEnv('VITE_DEV_LOGIN', 'true')
+    stubFetch(() =>
+      jsonResponse({ error: { code: 'unauthenticated', message: 'sign in to continue' } }, 401),
+    )
+
+    renderPage(<Account />, '/account')
+
+    const consent = await screen.findByRole('checkbox', {
+      name: 'J’ai 15 ans ou plus et j’accepte les CGU et la politique de confidentialité',
+    })
+    expect(consent).not.toBeChecked()
+    // Without the accepted version the api answers `consent_required`, so no href may exist.
+    expect(
+      screen.queryByRole('link', { name: /se connecter avec le compte de développement/i }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /se connecter avec le compte de développement/i }),
+    ).toBeDisabled()
+    expect(screen.getByRole('link', { name: 'CGU' })).toHaveAttribute('href', '/cgu')
+    expect(screen.getByRole('link', { name: 'politique de confidentialité' })).toHaveAttribute(
+      'href',
+      '/confidentialite',
+    )
+
+    await userEvent.click(consent)
+
     expect(
       screen.getByRole('link', { name: /se connecter avec le compte de développement/i }),
-    ).toHaveAttribute('href', '/auth/dev/start?purpose=login')
-    expect(screen.queryByText(/sign in to continue/i)).not.toBeInTheDocument()
+    ).toHaveAttribute('href', '/auth/dev/start?purpose=login&accept=2026-11-14')
   })
 
   it('says sign-in is not switched on, and offers no link, when the dev door is off', async () => {

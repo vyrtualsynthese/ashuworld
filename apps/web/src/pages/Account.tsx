@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   ApiError,
   detachIdentity,
@@ -12,6 +12,7 @@ import {
 import { LevelBadge } from '../components/LevelBadge'
 import { devLoginAvailable } from '../devLogin'
 import { formatNumber } from '../format'
+import { TERMS_VERSION } from '../legal/content'
 import { LINKABLE_PROVIDERS, isProviderName, providerLabel } from '../providers'
 import { useResource } from '../useResource'
 
@@ -39,9 +40,14 @@ type Notice =
  *
  * The provider is escaped even though every caller passes a known name: an href is a
  * destination, and the escaping belongs at the point the string becomes one.
+ *
+ * `accept` is the terms version the Dachi ticked. The api refuses a `login` start without
+ * it (`400 consent_required`), while a `link` starts from a session that already accepted,
+ * so only the `login` callers pass it.
  */
-function signInHref(provider: string, purpose: 'login' | 'link'): string {
-  return `/auth/${encodeURIComponent(provider)}/start?purpose=${purpose}`
+function signInHref(provider: string, purpose: 'login' | 'link', accept?: string): string {
+  const base = `/auth/${encodeURIComponent(provider)}/start?purpose=${purpose}`
+  return accept === undefined ? base : `${base}&accept=${encodeURIComponent(accept)}`
 }
 
 /** The one sentence about a forfeit, so the confirmation and the result cannot disagree. */
@@ -53,6 +59,10 @@ function forfeitSentence(entries: number): string {
 
 function SignInPanel() {
   const devDoor = devLoginAvailable()
+  // The api refuses a login start that does not name the accepted version, so the tick is
+  // what unlocks the control, not a decoration next to it.
+  const [accepted, setAccepted] = useState(false)
+  const devText = 'Se connecter avec le compte de développement'
 
   return (
     <section className="panel" aria-labelledby="sign-in-heading">
@@ -68,9 +78,26 @@ function SignInPanel() {
             un compte de test nommé et ne prouve rien : elle n’est pas destinée aux vrais
             Dachis.
           </p>
-          <a className="button" href={signInHref('dev', 'login')}>
-            Se connecter avec le compte de développement
-          </a>
+          <p>
+            <label>
+              <input
+                type="checkbox"
+                checked={accepted}
+                onChange={(event) => setAccepted(event.target.checked)}
+              />{' '}
+              J’ai 15 ans ou plus et j’accepte les <Link to="/cgu">CGU</Link> et la{' '}
+              <Link to="/confidentialite">politique de confidentialité</Link>
+            </label>
+          </p>
+          {accepted ? (
+            <a className="button" href={signInHref('dev', 'login', TERMS_VERSION)}>
+              {devText}
+            </a>
+          ) : (
+            <button type="button" disabled>
+              {devText}
+            </button>
+          )}
         </>
       ) : (
         <p className="muted">
