@@ -53,6 +53,26 @@ export function isUniqueViolation(error: unknown, constraint: string): boolean {
 }
 
 /**
+ * Refuses a caller that passed a bare pool instead of an open transaction.
+ *
+ * The ledger writes that call this helper depend on statement lifetime: a `for update`
+ * lock is held until the transaction ends, and a savepoint only exists inside one. On a
+ * bare pool each statement autocommits on whichever connection the pool hands out, so
+ * `detachIdentity` would release its fan lock before the count is decided and two
+ * concurrent detaches could each unlink one of the fan's two identities, leaving the
+ * zero-identity account the rule forbids. A failure halfway through could likewise leave
+ * a punishment or a forfeit committed without the rest of the work.
+ *
+ * Postgres rejects `savepoint` outside a transaction block ("SAVEPOINT can only be used
+ * in transaction blocks"), so this pair is the cheapest enforcement the database offers.
+ * It costs two round trips inside a real transaction.
+ */
+export async function requireTransaction(tx: Queryable): Promise<void> {
+  await tx.query('savepoint ledger_tx_required')
+  await tx.query('release savepoint ledger_tx_required')
+}
+
+/**
  * Runs `fn` inside `begin`/`commit`, rolling back if it throws and always returning the
  * connection to the pool. A connection whose rollback fails is destroyed instead of
  * being handed to the next caller in an unknown transaction state.
