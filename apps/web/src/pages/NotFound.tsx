@@ -12,7 +12,7 @@ export function NotFound() {
     <main className="page">
       <h1>Page introuvable</h1>
       <p>L’adresse que tu as suivie ne mène à aucune page d’AshuWorld.</p>
-      <Link className="button" to="/ladder">
+      <Link className="button" to="/">
         Retour au classement
       </Link>
     </main>
