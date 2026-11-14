@@ -1,6 +1,5 @@
-import type { Pool } from 'pg'
 import { createPool } from '@ashuworld/ledger'
-import { runLoop } from './loop.js'
+import { runCli } from './cli.js'
 import type { ProcessorMap } from './processors.js'
 
 /**
@@ -31,13 +30,17 @@ function loadDatabaseUrl(raw: NodeJS.ProcessEnv = process.env): string {
 /**
  * The process shell: real environment, real pool, real signals.
  *
- * SIGTERM (and SIGINT for a terminal) aborts the loop. A poll already in flight finishes
- * and commits — the abort is checked between polls — so shutdown cannot interrupt a
- * processor halfway through its transaction. Then the pool closes and the process exits.
- * A second signal reaches the same idempotent `stop`.
+ * The command dispatch lives in `runCli` and returns an exit code; this function only
+ * wires the environment, signals and the pool. SIGTERM (and SIGINT for a terminal) aborts
+ * the loop. A poll already in flight finishes and commits — the abort is checked between
+ * polls — so shutdown cannot interrupt a processor halfway through its transaction. Then
+ * the pool closes. A second signal reaches the same idempotent `stop`.
+ *
+ * The reset subcommand is not interruptible by the signal: it is one transaction, and
+ * Postgres rolls it back if the process dies, so there is no half-wiped state to finish.
  */
-async function main(): Promise<void> {
-  const pool: Pool = createPool(loadDatabaseUrl())
+async function main(argv: readonly string[]): Promise<number> {
+  const pool = createPool(loadDatabaseUrl())
   const controller = new AbortController()
 
   const stop = (signal: NodeJS.Signals): void => {
@@ -48,11 +51,9 @@ async function main(): Promise<void> {
   process.on('SIGTERM', stop)
   process.on('SIGINT', stop)
 
+  let code = 1
   try {
-    await runLoop(pool, PROCESSORS, { signal: controller.signal })
-  } catch (error) {
-    console.error('[worker] the loop stopped with an error', error)
-    process.exitCode = 1
+    code = await runCli(argv, { pool, processors: PROCESSORS, signal: controller.signal })
   } finally {
     process.off('SIGTERM', stop)
     process.off('SIGINT', stop)
@@ -60,13 +61,14 @@ async function main(): Promise<void> {
       await pool.end()
     } catch (error) {
       console.error('[worker] the pool did not close cleanly', error)
-      process.exitCode = 1
+      code = 1
     }
   }
+  return code
 }
 
 try {
-  await main()
+  process.exitCode = await main(process.argv.slice(2))
 } catch (error) {
   console.error(error instanceof Error ? error.message : error)
   process.exitCode = 1
