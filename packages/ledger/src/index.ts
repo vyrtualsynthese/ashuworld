@@ -61,18 +61,24 @@ export {
   type PenaltyErrorCode,
 } from './penalty.js'
 export {
+  AUDIT_RETENTION_DAYS,
   ERASURE_PEPPER_ENV,
+  INACTIVE_FAN_RETENTION_DAYS,
   IdentityAttachedError,
   IdentityNotFoundError,
+  NEVER_LINKED_IDENTITY_RETENTION_DAYS,
+  PROCESSED_EVENT_RETENTION_DAYS,
   eraseFan,
   eraseIdentity,
   erasedExternalId,
   exportFan,
+  purgeBatch,
   type EraseFanResult,
   type EraseIdentityResult,
   type ExportEntry,
   type ExportIdentity,
   type FanExport,
+  type PurgeResult,
 } from './privacy.js'
 export {
   ALPHA_RESET_CONFIRM_ENV,

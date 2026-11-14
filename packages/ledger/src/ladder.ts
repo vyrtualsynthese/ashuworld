@@ -47,8 +47,13 @@ export interface Ladder {
  * identity still fails this test. Keeping the predicate in one string is what stops a
  * later query (or a test) from writing `fan_id is null` alone and quietly putting a
  * once-linked account back on the public ladder — the exact regression the design forbids.
+ *
+ * The `erased:` test keeps an anonymised identity off the list even when a later platform
+ * event pays it a fresh earn: erasure forfeits the earns of the day, but the row can still
+ * earn again, and its display handle is now the neutral placeholder rather than a person.
  */
-const FREE_STANDING = 'i.fan_id is null and i.first_linked_at is null'
+const FREE_STANDING =
+  "i.fan_id is null and i.first_linked_at is null and i.external_id not like 'erased:%'"
 
 interface LinkedRow {
   handle: string
@@ -80,7 +85,9 @@ interface FreeRow {
  *
  * A fan who lost everything still belongs on the ladder: their balance is 0 and they sort
  * to the bottom, but they do not vanish because they had a bad month. Ties break by
- * handle so the order is stable between two requests that see the same snapshot.
+ * handle so the order is stable between two requests that see the same snapshot. An
+ * erased account is the one exception: the row survives for its history, but the person
+ * asked to be forgotten, so neither list names them.
  *
  * A free-standing identity appears only when it has an earn that has not been forfeited.
  * A row with 0 xp would be a placeholder, not a competitor; an identity that earned and
@@ -95,6 +102,7 @@ export async function listLadder(tx: Queryable): Promise<Ladder> {
     `select f.handle, f.level, coalesce(live.balance, 0) as balance
        from fans f
        left join (${liveBalancesQuery()}) live on live.fan_id = f.id
+      where f.erased_at is null
       order by coalesce(live.balance, 0) desc, f.handle asc`,
   )
 
@@ -148,6 +156,9 @@ interface AccountIdentityRow {
  * check allows nothing else), so a path segment typed as `Ashu` still finds the account
  * while the comparison stays exact rather than relying on `ilike`.
  *
+ * `null` for an erased account too, under the handle it was anonymised to: the row is
+ * still there for its ledger history, but there is no person left to publish.
+ *
  * Only identities with both a `fan_id` and a `linked_at` are listed: that is the same
  * attachment rule the balance uses, so the profile cannot show an identity whose xp it is
  * not counting. `external_id` is never selected — it is the provider's account id, and a
@@ -161,7 +172,8 @@ export async function getFanByHandle(
   const { rows } = await tx.query<FanRow>(
     `select id, handle, display_name
        from fans
-      where handle = $1`,
+      where handle = $1
+        and erased_at is null`,
     [normalised],
   )
   const fan = rows[0]
