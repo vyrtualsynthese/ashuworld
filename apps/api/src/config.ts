@@ -18,7 +18,7 @@ export interface Env {
 const DEFAULT_SESSION_COOKIE_NAME = 'ashuworld_session'
 const DEFAULT_PORT = 3000
 
-/** A required variable, or a plain error that names it. Empty is missing. */
+/** A required variable, or a plain error that names it. Empty is missing, and the value is trimmed. */
 function required(raw: NodeJS.ProcessEnv, name: string): string {
   const value = raw[name]
   if (value === undefined || value.trim() === '') {
@@ -26,7 +26,7 @@ function required(raw: NodeJS.ProcessEnv, name: string): string {
       `${name} is required but was not set; export it before starting the api`,
     )
   }
-  return value
+  return value.trim()
 }
 
 /**

@@ -10,6 +10,7 @@ import {
 } from '@ashuworld/ledger'
 import { loadEnv, type Env } from '../src/config.js'
 import { buildServer } from '../src/server.js'
+import { HEALTH_TIMEOUT_MS } from '../src/routes/health.js'
 
 const cfg: GameConfig = {
   version: 'test',
@@ -80,6 +81,7 @@ describe('GET /api/health', () => {
       const res = await app.inject({ method: 'GET', url: '/api/health' })
       expect(res.statusCode).toBe(200)
       expect(res.json()).toEqual({ ok: true })
+      expect(res.headers['content-type']).toContain('application/json')
     })
   })
 
@@ -97,9 +99,37 @@ describe('GET /api/health', () => {
             message: 'the database did not answer a health check',
           },
         })
+        expect(res.headers['content-type']).toContain('application/json')
       },
       { pool: deadPool },
     )
+  })
+
+  it('answers 503 within the timeout when the database never answers at all', async () => {
+    // A pool whose connection accepts every statement and then never resolves: the
+    // shape of a database that holds the TCP connection but stops answering. Without a
+    // bound this probe hangs forever and each request leaks a client.
+    const never = new Promise<never>(() => undefined)
+    const hangingPool = {
+      connect: async () => ({ query: () => never, release: () => undefined }),
+      end: async () => undefined,
+    } as unknown as Pool
+
+    const started = Date.now()
+    await withApp(
+      async (app) => {
+        const res = await app.inject({ method: 'GET', url: '/api/health' })
+        expect(res.statusCode).toBe(503)
+        expect(res.json()).toEqual({
+          error: {
+            code: 'database_unavailable',
+            message: 'the database did not answer a health check',
+          },
+        })
+      },
+      { pool: hangingPool },
+    )
+    expect(Date.now() - started).toBeLessThan(HEALTH_TIMEOUT_MS + 1_500)
   })
 })
 
@@ -150,6 +180,18 @@ describe('loadEnv', () => {
     })
   })
 
+  it('trims required values like the other readers do', () => {
+    expect(
+      loadEnv({
+        DATABASE_URL: '  postgres://ashu:ashu@localhost:5432/ashu  ',
+        PUBLIC_BASE_URL: ' https://ashu.example ',
+      }),
+    ).toMatchObject({
+      DATABASE_URL: 'postgres://ashu:ashu@localhost:5432/ashu',
+      PUBLIC_BASE_URL: 'https://ashu.example',
+    })
+  })
+
   it('accepts an explicit false, and blank optional values fall back to defaults', () => {
     expect(
       loadEnv({
@@ -189,6 +231,7 @@ describe('error shape', () => {
       expect(res.json()).toEqual({
         error: { code: 'invalid_amount', message: 'a punishment must lower the balance' },
       })
+      expect(res.headers['content-type']).toContain('application/json')
     })
   })
 
@@ -265,6 +308,77 @@ describe('error shape', () => {
     })
   })
 
+  it('keeps a malformed JSON body a 400', async () => {
+    await withApp(async (app) => {
+      app.post('/test/echo', async () => ({ ok: true }))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/test/echo',
+        headers: { 'content-type': 'application/json' },
+        payload: '{"broken":',
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toEqual({
+        error: { code: 'bad_request', message: 'the request could not be understood' },
+      })
+    })
+  })
+
+  it('keeps an oversized body a 413', async () => {
+    await withApp(async (app) => {
+      app.post('/test/echo', async () => ({ ok: true }))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/test/echo',
+        headers: { 'content-type': 'application/json' },
+        payload: 'x'.repeat(1_048_577),
+      })
+      expect(res.statusCode).toBe(413)
+      expect(res.json()).toEqual({
+        error: { code: 'payload_too_large', message: 'the request body is too large' },
+      })
+    })
+  })
+
+  it('keeps an unsupported content type a 415', async () => {
+    await withApp(async (app) => {
+      app.post('/test/echo', async () => ({ ok: true }))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/test/echo',
+        headers: { 'content-type': 'application/xml' },
+        payload: '<x/>',
+      })
+      expect(res.statusCode).toBe(415)
+      expect(res.json()).toEqual({
+        error: {
+          code: 'unsupported_media_type',
+          message: 'the request content type is not supported',
+        },
+      })
+    })
+  })
+
+  it('maps any other client status to that status with a generic message', async () => {
+    await withApp(async (app) => {
+      app.get('/test/teapot', async () => {
+        const error = new Error('I am a teapot')
+        ;(error as { statusCode?: number }).statusCode = 418
+        throw error
+      })
+
+      const res = await app.inject({ method: 'GET', url: '/test/teapot' })
+      expect(res.statusCode).toBe(418)
+      expect(res.json()).toEqual({
+        error: { code: 'client_error', message: 'the request was refused' },
+      })
+      expect(res.body).not.toContain('teapot')
+    })
+  })
+
   it('hides and logs an unknown error', async () => {
     await withApp(async (app) => {
       const logged = vi.spyOn(app.log, 'error')
@@ -278,21 +392,39 @@ describe('error shape', () => {
         error: { code: 'internal', message: 'the server could not complete the request' },
       })
       expect(res.body).not.toContain('secret detail')
+      expect(res.body).not.toContain('stack')
       expect(logged).toHaveBeenCalled()
       expect(logged.mock.calls.some((call) => String(call[1]).includes('unhandled'))).toBe(true)
     })
   })
 
-  it('answers an unknown route with 404 not_found in the same shape', async () => {
+  it('answers an unknown GET route with a fixed 404 that does not echo the request', async () => {
     await withApp(async (app) => {
-      const res = await app.inject({ method: 'GET', url: '/api/nope' })
+      const res = await app.inject({ method: 'GET', url: '/api/nope?token=abc' })
       expect(res.statusCode).toBe(404)
       expect(res.json()).toEqual({
         error: {
           code: 'not_found',
-          message: 'no route matches GET /api/nope',
+          message: 'the requested resource does not exist',
         },
       })
+      expect(res.body).not.toContain('/api/nope')
+      expect(res.body).not.toContain('token')
+    })
+  })
+
+  it('answers an unknown POST route with the same fixed 404', async () => {
+    await withApp(async (app) => {
+      const logged = vi.spyOn(app.log, 'info')
+      const res = await app.inject({ method: 'POST', url: '/api/nope', payload: {} })
+      expect(res.statusCode).toBe(404)
+      expect(res.json()).toEqual({
+        error: {
+          code: 'not_found',
+          message: 'the requested resource does not exist',
+        },
+      })
+      expect(logged).toHaveBeenCalled()
     })
   })
 })
