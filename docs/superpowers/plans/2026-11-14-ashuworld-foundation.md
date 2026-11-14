@@ -1108,7 +1108,7 @@ Expected: FAIL — no chart.
 
 - [ ] **Step 3: Implement**
 
-Multi-stage Dockerfiles: an `esbuild` bundle per app (workspace packages export TypeScript source, so the bundle is the build step — no runtime TypeScript), then a `node:22-slim` image running the bundle as uid 10001, non-root, `NODE_ENV=production`, `node dist/server.js`. The web image is a Vite build served by `nginx:alpine` with a SPA fallback and `/api` proxy to the api Service so the single-origin constraint holds in-cluster too. Ingress paths: `/` → web, `/api` and `/auth` → api, `/hooks` → worker. Every container gets `readOnlyRootFilesystem`, a writable `emptyDir` only where required, and resource requests.
+Multi-stage Dockerfiles: an `esbuild` bundle per Node app (workspace packages export TypeScript source, so the bundle is the build step — no runtime TypeScript), then a `node:22-slim` image running the bundle as uid 10001, non-root, `NODE_ENV=production`, `node dist/server.js`. The web image is a `vite build` served by `nginx:alpine`: SPA fallback (`try_files $uri /index.html`) for `/`, `/ladder`, `/f/*`, `/account`, and a proxy for `/api` and `/auth` to the api Service, so the single-origin constraint holds in-cluster and the `HttpOnly` session cookie keeps working. The SPA fallback must not shadow `/api`, `/auth` or `/hooks`. `VITE_DEV_LOGIN` is baked in at build time, so flipping it means rebuilding that image — say so in the chart's values comment. Ingress paths: `/` → web, `/api` and `/auth` → api, `/hooks` → worker. Every container gets `readOnlyRootFilesystem`, a writable `emptyDir` only where required, and resource requests.
 
 - [ ] **Step 4: Run the checks**
 
