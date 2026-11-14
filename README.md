@@ -1,15 +1,15 @@
 # AshuWorld
 
-Fans earn XP for what they do for the channel, level up, and can show that level wherever
-they appear. This repository is the system behind it: an XP ledger, fan accounts that link the
-platforms a fan already uses, a public ladder, and the deployment that runs it.
+Dachis earn XP for what they do for the channel, level up, and can show that level wherever
+they appear. This repository is the system behind it: an XP ledger, Dachi accounts that link the
+platforms a Dachi already uses, a public ladder, and the deployment that runs it.
 
 The design is written down before the code, in
 [`docs/superpowers/specs/2026-11-14-ashuworld-fan-xp-design.md`](docs/superpowers/specs/2026-11-14-ashuworld-fan-xp-design.md),
 and the build order in
 [`docs/superpowers/plans/2026-11-14-ashuworld-foundation.md`](docs/superpowers/plans/2026-11-14-ashuworld-foundation.md).
 
-**Status: alpha.** Data will be wiped before launch. Onboarding is open to early fans so the
+**Status: alpha.** Data will be wiped before launch. Onboarding is open to early Dachis so the
 numbers can be tuned against real behaviour.
 
 ## The rules the code enforces
@@ -19,11 +19,11 @@ numbers can be tuned against real behaviour.
 - **One action, one credit.** A one-time action pays once per provider account, enforced by a
   partial unique index. Unfollowing, refollowing and re-linking cannot pay twice.
 - **Detaching is a forfeit, not a pause.** The earns are marked `forfeited_at`, never deleted, so
-  the action stays spent and the XP does not come back if the account is attached again.
-- **A linked account never returns to the ladder.** Once an identity has belonged to a fan
+  the action cannot pay a second time and the XP does not come back if the account is attached again.
+- **A linked account never returns to the ladder.** Once an identity has belonged to a Dachi
   account it has no public life of its own, even after a detach.
-- **One fan, many doors, no impersonation.** A fan holds at most one account per platform,
-  always keeps at least one way in, and can never read or act on another fan's data.
+- **One Dachi, many doors, no impersonation.** A Dachi holds at most one account per platform,
+  always keeps at least one way in, and can never read or act on another Dachi's data.
 
 ## What is in here
 
@@ -54,9 +54,9 @@ docker compose up --build
 Then open <http://localhost:8080>.
 
 - **Sign in:** the account page offers a dev sign-in (the `dev` provider). Type a handle and you
-  get a fan with no platform involved. It exists so the flow is testable before the real
+  get a Dachi with no platform involved. It exists so the flow is testable before the real
   Twitch, Discord and YouTube applications exist, and `ALLOW_DEV_LOGIN` is off everywhere else.
-- **Ladder:** <http://localhost:8080/ladder> starts empty and fills in as fans earn.
+- **Ladder:** <http://localhost:8080/ladder> starts empty and fills in as Dachis earn.
 - **Database:** Postgres is on `localhost:5432`, user, password and database all `ashu`.
 - **Stop:** `docker compose down`. Add `-v` to throw the database away and start clean.
 
@@ -162,7 +162,7 @@ next to the bundle.
 ## Where we are going
 
 The foundation is in: ledger, accounts, ladder, worker, images and chart. Next are the platform
-adapters (Twitch EventSub, Discord membership, YouTube subscription through each fan's own
+adapters (Twitch EventSub, Discord membership, YouTube subscription through each Dachi's own
 grant), the operator tools (punishments, the audited account repair), and the bot and overlay
 surfaces that read the public profile API.
 
