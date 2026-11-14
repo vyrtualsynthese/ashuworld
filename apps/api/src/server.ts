@@ -6,6 +6,7 @@ import Fastify, {
 } from 'fastify'
 import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'
+import rateLimit from '@fastify/rate-limit'
 import type { Pool } from 'pg'
 import { ConfigError, type GameConfig } from '@ashuworld/gameconfig'
 import { AwardConflictError, HandleTakenError, PenaltyError } from '@ashuworld/ledger'
@@ -19,6 +20,7 @@ import { registerIdentityRoutes } from './routes/identities.js'
 import { registerMeRoutes } from './routes/me.js'
 import { registerPublicRoutes } from './routes/public.js'
 import { helmetOptions } from './security/headers.js'
+import { rateLimitOptions } from './security/rateLimit.js'
 
 export interface ServerDeps {
   pool: Pool
@@ -120,6 +122,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // it once here, rather than per route, is what leaves a future route no way to opt out.
   app.register(helmet, helmetOptions())
 
+  // In-memory at alpha: each pod counts its own clients. A shared store is what a
+  // multi-replica deployment would need; see the design's accepted consequence.
+  if (env.RATE_LIMIT_ENABLED) app.register(rateLimit, rateLimitOptions(env))
+
   /**
    * One error shape for every failure: `{ error: { code, message } }`.
    *
@@ -166,6 +172,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     // the message stays generic because Fastify's own one is not always useful to a
     // client, but the status and the envelope are preserved.
     const status = error.statusCode
+    if (status === 429) {
+      const retryAfter = (error as { retryAfter?: unknown }).retryAfter
+      if (typeof retryAfter === 'number') {
+        reply.header('Retry-After', String(Math.ceil(retryAfter / 1000)))
+      }
+      return reply
+        .code(429)
+        .send(errorBody('rate_limited', 'too many requests in a short window; wait a moment and try again'))
+    }
     if (typeof status === 'number' && status >= 400 && status <= 499) {
       const response = CLIENT_ERRORS[status] ?? FALLBACK_CLIENT_ERROR
       return reply.code(status).send(errorBody(response.code, response.message))
@@ -192,15 +207,22 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return reply.code(404).send(notFoundBody())
   })
 
-  registerHealthRoutes(app, pool)
-  registerPublicRoutes(app, { pool, cfg })
-  registerMeRoutes(app, { pool, env })
-  registerIdentityRoutes(app, { pool, cfg, env })
-  registerAuthRoutes(app, {
-    pool,
-    cfg,
-    env,
-    ...(deps.providers === undefined ? {} : { providers: deps.providers }),
+  // The limiter reads each route's `config.rateLimit` from an `onRoute` hook that only
+  // exists once the plugin has loaded. A plugin registered here loads at boot, while a
+  // route added directly in this function is added immediately, so declaring the routes
+  // inside `after` is what makes the per-route budgets apply. `after` keeps `buildServer`
+  // synchronous, which every test and `src/index.ts` relies on.
+  app.after(() => {
+    registerHealthRoutes(app, pool)
+    registerPublicRoutes(app, { pool, cfg })
+    registerMeRoutes(app, { pool, env })
+    registerIdentityRoutes(app, { pool, cfg, env })
+    registerAuthRoutes(app, {
+      pool,
+      cfg,
+      env,
+      ...(deps.providers === undefined ? {} : { providers: deps.providers }),
+    })
   })
   return app
 }

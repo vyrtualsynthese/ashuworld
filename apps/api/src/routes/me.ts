@@ -9,6 +9,7 @@ import {
   type AuthDeps,
 } from '../auth/session.js'
 import { listIdentities, type FanIdentity } from './identities.js'
+import { authRateLimit } from '../security/rateLimit.js'
 
 /** What `GET /api/me` answers: the account, its live standing and its identities. */
 export interface FanProfile {
@@ -93,7 +94,7 @@ export function registerMeRoutes(app: FastifyInstance, deps: AuthDeps): void {
     return withTransaction(deps.pool, (tx) => readFanProfile(tx, fanId))
   })
 
-  app.post('/auth/logout', async (request, reply) => {
+  app.post('/auth/logout', { config: { rateLimit: authRateLimit(deps.env) } }, async (request, reply) => {
     const sessionId = request.cookies[deps.env.SESSION_COOKIE_NAME]
     if (sessionId !== undefined && isSessionId(sessionId)) {
       try {

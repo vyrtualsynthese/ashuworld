@@ -9,6 +9,7 @@ import {
   type Standing,
 } from '@ashuworld/ledger'
 import { authenticatedFanId, requireFan, type AuthDeps } from '../auth/session.js'
+import { writeRateLimit } from '../security/rateLimit.js'
 import { errorBody, notFoundBody } from '../errors.js'
 
 /** One provider account currently attached to the fan. */
@@ -155,7 +156,7 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: IdentityRoute
 
   app.post<{ Params: { identityId: string } }>(
     '/api/me/identities/:identityId/detach',
-    { preHandler: requireSession },
+    { preHandler: requireSession, config: { rateLimit: writeRateLimit(deps.env) } },
     async (request, reply) => {
       const fanId = authenticatedFanId(request)
       const { identityId } = request.params

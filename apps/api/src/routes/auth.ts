@@ -25,6 +25,7 @@ import {
   sessionFanId,
   setSessionCookie,
 } from '../auth/session.js'
+import { authRateLimit } from '../security/rateLimit.js'
 
 export interface AuthRouteDeps {
   pool: Pool
@@ -245,6 +246,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
   app.get<{ Params: { provider: string }; Querystring: StartQuery }>(
     '/auth/:provider/start',
     {
+      config: { rateLimit: authRateLimit(deps.env) },
       preHandler: async (request, reply) => {
         // Only `link` needs a fan. Enforcing it in the preHandler keeps the one code path
         // that turns a cookie into a fan, instead of a second reading of the cookie here.
@@ -286,6 +288,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
 
   app.get<{ Params: { provider: string }; Querystring: CallbackQuery }>(
     '/auth/:provider/callback',
+    { config: { rateLimit: authRateLimit(deps.env) } },
     async (request, reply) => {
       // Every terminal path clears the binding cookie. Doing it up front means no branch
       // below has to remember: an error, a mismatch and a success all leave the browser
