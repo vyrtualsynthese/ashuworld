@@ -4,8 +4,11 @@ import userEvent from '@testing-library/user-event'
 import { Account } from '../src/pages/Account'
 import { Ladder } from '../src/pages/Ladder'
 import { Profile } from '../src/pages/Profile'
+import { Xp } from '../src/pages/Xp'
+import { formatNumber } from '../src/format'
 import {
   FAN,
+  GAME,
   LADDER,
   ME,
   jsonResponse,
@@ -153,6 +156,105 @@ describe('Ladder', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /réessayer/i }))
     expect(await screen.findByRole('link', { name: 'ashu' })).toBeInTheDocument()
+  })
+})
+
+describe('Xp', () => {
+  it('shows every action with its label, description, platform and amount', async () => {
+    stubFetch(() => jsonResponse(GAME))
+
+    renderPage(<Xp />, '/xp')
+
+    const actions = await screen.findByRole('region', { name: 'Les actions' })
+    const rows = within(actions).getAllByRole('row')
+    // One header row plus one row per action, in the order the api sent them.
+    expect(rows).toHaveLength(GAME.actions.length + 1)
+    expect(within(rows[0]!).getByRole('columnheader', { name: 'Action' })).toBeInTheDocument()
+    expect(
+      within(rows[0]!).getByRole('columnheader', { name: 'Plateforme' }),
+    ).toBeInTheDocument()
+    expect(within(rows[0]!).getByRole('columnheader', { name: 'XP' })).toBeInTheDocument()
+
+    for (const [index, action] of GAME.actions.entries()) {
+      const row = rows[index + 1]!
+      // The name is the row's anchor, so it is bold; the one-per-account rule sits under it.
+      expect(within(row).getByText(action.label).tagName).toBe('STRONG')
+      expect(within(row).getByText(action.description)).toBeInTheDocument()
+      expect(within(row).getByText(formatNumber(action.amount))).toBeInTheDocument()
+    }
+
+    // The platform is named for a reader, not echoed as the api's slug.
+    expect(within(rows[1]!).getByText('YouTube')).toBeInTheDocument()
+    expect(within(rows[2]!).getByText('Discord')).toBeInTheDocument()
+    expect(within(rows[3]!).getByText('Twitch')).toBeInTheDocument()
+  })
+
+  it('renders the level thresholds in order, formatted for reading', async () => {
+    stubFetch(() => jsonResponse(GAME))
+
+    renderPage(<Xp />, '/xp')
+
+    const levels = await screen.findByRole('region', { name: 'Les niveaux' })
+    const rows = within(levels).getAllByRole('row')
+    expect(within(rows[0]!).getByRole('columnheader', { name: 'Niveau' })).toBeInTheDocument()
+    expect(
+      within(rows[0]!).getByRole('columnheader', { name: 'XP requis' }),
+    ).toBeInTheDocument()
+
+    // `1500` must come out as the French `1 500`: the raw number would fail here.
+    expect(rows.slice(1).map((row) => row.textContent)).toEqual([
+      `0${formatNumber(0)}`,
+      `1${formatNumber(100)}`,
+      `2${formatNumber(1500)}`,
+    ])
+    expect(within(levels).getByText(/le niveau est conservé même quand l'xp baisse/i)).toBeInTheDocument()
+  })
+
+  it('gives both tables an accessible heading', async () => {
+    stubFetch(() => jsonResponse(GAME))
+
+    renderPage(<Xp />, '/xp')
+
+    expect(
+      await screen.findByRole('heading', { name: 'Les actions', level: 2 }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Les niveaux', level: 2 }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: "Gagner de l'XP", level: 1 })).toBeInTheDocument()
+  })
+
+  it('offers a retry when the rules cannot be loaded', async () => {
+    let attempts = 0
+    stubFetch(() => {
+      attempts += 1
+      if (attempts === 1) {
+        return jsonResponse(
+          { error: { code: 'database_unavailable', message: 'the database did not answer' } },
+          503,
+        )
+      }
+      return jsonResponse(GAME)
+    })
+
+    renderPage(<Xp />, '/xp')
+
+    expect(
+      await screen.findByRole('heading', { name: /les règles n'ont pas pu être chargées/i }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/the database did not answer/i)).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /réessayer/i }))
+    expect(await screen.findByRole('region', { name: 'Les actions' })).toBeInTheDocument()
+    expect(screen.getByText(GAME.actions[0]!.label)).toBeInTheDocument()
+  })
+
+  it('says the rules are loading while the request is in flight', () => {
+    stubFetch(() => new Promise<Response>(() => {}))
+
+    renderPage(<Xp />, '/xp')
+
+    expect(screen.getByText('Chargement des règles…')).toBeInTheDocument()
   })
 })
 

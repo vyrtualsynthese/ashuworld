@@ -99,3 +99,40 @@ export const FAN = {
     { provider: 'discord', displayHandle: 'ashu_dc' },
   ],
 }
+
+/**
+ * The public game rules, shaped like the api's answer.
+ *
+ * The last level uses a four-digit threshold on purpose: it is the one row where
+ * `formatNumber` changes the text, so a page that printed the raw number fails.
+ */
+export const GAME = {
+  actions: [
+    {
+      key: 'youtube.subscribe',
+      provider: 'youtube',
+      amount: 100,
+      label: "S'abonner à la chaîne sur YouTube",
+      description: 'Une seule fois, par compte YouTube rattaché.',
+    },
+    {
+      key: 'discord.member',
+      provider: 'discord',
+      amount: 75,
+      label: 'Rejoindre le serveur Discord',
+      description: 'Une seule fois, par compte Discord rattaché.',
+    },
+    {
+      key: 'twitch.follow',
+      provider: 'twitch',
+      amount: 50,
+      label: 'Suivre la chaîne sur Twitch',
+      description: 'Une seule fois, par compte Twitch rattaché.',
+    },
+  ],
+  levels: [
+    { level: 0, minXp: 0 },
+    { level: 1, minXp: 100 },
+    { level: 2, minXp: 1500 },
+  ],
+}
