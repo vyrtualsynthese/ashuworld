@@ -45,6 +45,11 @@ function testEnv(overrides: Partial<Env> = {}): Env {
     TRUST_PROXY: false,
     PUBLIC_BASE_URL: 'http://localhost:3000',
     PORT: 3000,
+    RATE_LIMIT_ENABLED: false,
+    RATE_LIMIT_WINDOW_MS: 60_000,
+    RATE_LIMIT_PUBLIC_MAX: 120,
+    RATE_LIMIT_AUTH_MAX: 20,
+    RATE_LIMIT_WRITE_MAX: 10,
     ...overrides,
   }
 }
@@ -162,6 +167,11 @@ describe('loadEnv', () => {
       ALLOW_DEV_LOGIN: false,
       TRUST_PROXY: false,
       PORT: 3000,
+      RATE_LIMIT_ENABLED: true,
+      RATE_LIMIT_WINDOW_MS: 60_000,
+      RATE_LIMIT_PUBLIC_MAX: 120,
+      RATE_LIMIT_AUTH_MAX: 20,
+      RATE_LIMIT_WRITE_MAX: 10,
       LOG_LEVEL: 'info',
     })
   })
@@ -218,6 +228,11 @@ describe('loadEnv', () => {
       ALLOW_DEV_LOGIN: true,
       TRUST_PROXY: true,
       PORT: 8080,
+      RATE_LIMIT_ENABLED: true,
+      RATE_LIMIT_WINDOW_MS: 60_000,
+      RATE_LIMIT_PUBLIC_MAX: 120,
+      RATE_LIMIT_AUTH_MAX: 20,
+      RATE_LIMIT_WRITE_MAX: 10,
       LOG_LEVEL: 'debug',
     })
   })
@@ -266,6 +281,20 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ ...required, PORT: '0' })).toThrow(/PORT/)
     expect(() => loadEnv({ ...required, PORT: '70000' })).toThrow(/PORT/)
     expect(() => loadEnv({ ...required, PORT: '30.5' })).toThrow(/PORT/)
+  })
+
+  it('defaults the rate limits when the variables are unset', () => {
+    expect(loadEnv(required)).toMatchObject({
+      RATE_LIMIT_ENABLED: true,
+      RATE_LIMIT_WINDOW_MS: 60_000,
+      RATE_LIMIT_PUBLIC_MAX: 120,
+      RATE_LIMIT_AUTH_MAX: 20,
+      RATE_LIMIT_WRITE_MAX: 10,
+    })
+  })
+
+  it('refuses a rate limit that is not a positive integer, naming the variable', () => {
+    expect(() => loadEnv({ ...required, RATE_LIMIT_AUTH_MAX: 'abc' })).toThrow(/RATE_LIMIT_AUTH_MAX/)
   })
 })
 
