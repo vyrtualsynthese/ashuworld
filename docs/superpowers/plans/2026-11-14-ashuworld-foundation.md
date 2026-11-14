@@ -24,6 +24,8 @@
 - Images are built per app and tagged with the commit SHA; migrations run as a Kubernetes `Job`.
 - Configuration comes from the environment, with these names: `DATABASE_URL`, `PORT` (default 3000), `SESSION_COOKIE_NAME`, `COOKIE_SECURE`, `PUBLIC_BASE_URL`, `ALLOW_DEV_LOGIN`, `GAME_CONFIG_VERSION`, `ALPHA_RESET_CONFIRM`.
 - Integration tests need a real Postgres in `TEST_DATABASE_URL`; CI provides it as a service container. No test may point at a real deployment.
+- **Coverage floor: 80% lines, branches, functions and statements**, enforced by `vitest --coverage` in CI. A change that drops the workspace below the floor fails the build; there is no per-file exception.
+- **Every exploit path gets a test, not a comment.** Authorisation mistakes, cross-fan access, replayed events, reused handshakes, guessed session ids, leaked identifiers in public payloads and a reset that fires without confirmation each have a named negative test in the task that owns the code, and a task is not done until its negative tests fail for the right reason before the guard exists.
 
 ## Review Focus
 
@@ -34,6 +36,8 @@ Five failure modes this system will actually meet, each pinned by a test in the 
 3. An identity showing up on the free-standing ladder after it was once linked → Task 6.
 4. Two concurrent link/detach calls producing a double balance or two owners of one identity → Task 6.
 5. An unverified or reused login handshake tying a fan to someone else's provider account → Task 10.
+6. One fan acting on another fan's identity by changing an id in a URL → Task 11.
+7. A public payload leaking provider account ids or a session cookie readable by script → Tasks 9 and 12.
 
 The rest of the spec — Twitch, Discord, YouTube adapters, punishment UI — becomes follow-up plans (see "Follow-up plans" at the end). This plan must ship working software on its own.
 
@@ -90,7 +94,7 @@ docker/{api,web,worker}.Dockerfile
 ### Task 1: Monorepo skeleton
 
 **Files:**
-- Create: `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `eslint.config.js`, `.gitignore`, `vitest.workspace.ts`
+- Create: `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `eslint.config.js`, `.gitignore`, `vitest.workspace.ts`, `vitest.config.ts`
 - Create: `apps/api/package.json`, `apps/web/package.json`, `apps/worker/package.json`, `packages/ledger/package.json`, `packages/gameconfig/package.json`, `packages/providers/package.json` (each `"private": true`, name `@ashuworld/<dir>`)
 - Create: `packages/providers/src/index.ts`, `packages/providers/test/providers.test.ts`
 - Create: `.github/workflows/ci.yml`
@@ -136,7 +140,9 @@ packages:
   - packages/*
 ```
 
-Root `package.json` scripts: `"typecheck": "tsc -b"`, `"lint": "eslint ."`, `"test": "vitest run"`, `"build": "pnpm -r build"`. Dev deps: `typescript`, `vitest`, `eslint`, `typescript-eslint`, `@types/node`. Each package gets `"test": "vitest run"` and `"typecheck": "tsc --noEmit"`.
+Root `package.json` scripts: `"typecheck": "tsc -b"`, `"lint": "eslint ."`, `"test": "vitest run"`, `"test:coverage": "vitest run --coverage"`, `"build": "pnpm -r build"`. Dev deps: `typescript`, `vitest`, `@vitest/coverage-v8`, `eslint`, `typescript-eslint`, `@types/node`. Each package gets `"test": "vitest run"` and `"typecheck": "tsc --noEmit"`.
+
+Root `vitest.config.ts` sets `test.coverage.provider = 'v8'`, reporters `['text', 'lcov']`, and `thresholds: { lines: 80, branches: 80, functions: 80, statements: 80 }`. Exclude only `**/dist/**`, `**/test/**`, `**/*.d.ts` and `**/*.config.ts`: generated glue is excluded, behaviour is not.
 
 `packages/providers/src/index.ts`:
 
@@ -159,7 +165,7 @@ export function isProviderName(value: string): value is ProviderName {
 
 `tsconfig.base.json`: `"target": "ES2023"`, `"module": "NodeNext"`, `"moduleResolution": "NodeNext"`, `"strict": true`, `"exactOptionalPropertyTypes": true`, `"noUncheckedIndexedAccess": true`, `"skipLibCheck": true`. `.gitignore`: `node_modules`, `dist`, `.env`, `*.tsbuildinfo`.
 
-`.github/workflows/ci.yml`: jobs `verify` (pnpm install, `pnpm typecheck`, `pnpm lint`, `pnpm test`) on push to `develop` and on pull requests.
+`.github/workflows/ci.yml`: jobs `verify` (pnpm install, `pnpm typecheck`, `pnpm lint`, `pnpm test:coverage`) on push to `develop` and on pull requests. The Postgres service container is wired in this file from the start so Task 3's tests can run there.
 
 - [ ] **Step 4: Run the tests and the gate**
 
@@ -733,6 +739,14 @@ it('rejects a request without a cookie', async () => { /* 401 unauthenticated */
 it('treats an expired session as signed out', async () => { /* backdate expires_at -> 401 */ })
 
 it('clears the cookie on logout', async () => { /* 204 and set-cookie with Max-Age=0 */ })
+
+it('marks the cookie HttpOnly and SameSite=Lax so a script cannot read it', async () => {
+  // inspect set-cookie: contains HttpOnly and SameSite=Lax, and no Secure when COOKIE_SECURE=false
+})
+
+it('rejects a session id that was never issued', async () => {
+  // cookie with 32 random bytes -> 401
+})
 ```
 
 - [ ] **Step 2: Run and watch it fail**
@@ -789,6 +803,10 @@ it('refuses a link handshake started by another fan', async () => {})
 
 it('creates a new fan for a never-linked identity and reuses the existing one next time', async () => {
   // callback twice with code=ashu -> one fans row, one provider_identities row
+})
+
+it('generates a state value an attacker cannot predict or reuse across providers', async () => {
+  // two handshakes differ, are >= 32 chars, and a state from provider A is rejected by B's callback
 })
 
 it('asks for confirmation instead of silently re-attaching a detached identity', async () => {
@@ -858,6 +876,10 @@ it('re-attaches only an identity that belongs to the caller', async () => { /* o
 it('does not restore xp on re-attach', async () => { /* balance unchanged after reattach */ })
 
 it('rejects an unauthenticated detach', async () => { /* 401 */ })
+
+it('returns 404 when the identity id belongs to another fan', async () => {
+  // guessed uuid -> 404, and the victim's identity is still attached afterwards
+})
 ```
 
 - [ ] **Step 2: Run and watch it fail**
@@ -906,6 +928,10 @@ it('hides a fan who forfeited everything into the same ranking', async () => { /
 it('serves a public profile without a session', async () => {})
 
 it('404s an unknown handle', async () => {})
+
+it('never exposes provider external ids, session ids or audit data publicly', async () => {
+  // deep-scan both public payloads for the external id string, the session id and 'external_id'
+})
 ```
 
 - [ ] **Step 2: Run and watch it fail**
@@ -1050,6 +1076,8 @@ echo "$out" | grep -q 'kind: Deployment' || { echo "no Deployment"; exit 1; }
 echo "$out" | grep -q '/hooks' || { echo "worker not routed"; exit 1; }
 echo "$out" | grep -q 'helm.sh/hook: pre-install,pre-upgrade' || { echo "no migrate job"; exit 1; }
 test "$(echo "$out" | grep -c 'kind: Deployment')" -eq 3 || { echo "expected 3 deployments"; exit 1; }
+test "$(echo "$out" | grep -c 'runAsNonRoot: true')" -ge 3 || { echo "containers run as root"; exit 1; }
+echo "$out" | grep -qi 'postgres://[^" ]*:[^" ]*@' && { echo "connection string rendered into the chart"; exit 1; }
 echo ok
 ```
 
