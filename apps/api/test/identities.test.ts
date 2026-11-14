@@ -571,6 +571,41 @@ describe('no attach endpoint', () => {
   })
 })
 
+describe('the public route table', () => {
+  // The public surface is a promise: every path here is readable by anyone, cached by a
+  // shared CDN, and ignored by the session. A new route under `/api/public` is therefore
+  // a security decision, not an implementation detail, so the whole set is pinned and a
+  // route added without thought fails the suite.
+  it('registers exactly these public GET routes', async () => {
+    await withApp(async (app) => {
+      await app.ready()
+      const gets = registeredRoutes(app)
+        .filter((route) => route.path.startsWith('/api/public/'))
+        .filter((route) => route.method === 'GET')
+        .map((route) => route.path)
+        .sort()
+
+      expect(gets).toEqual([
+        '/api/public/fans/:handle',
+        '/api/public/game',
+        '/api/public/ladder',
+        '/api/public/providers',
+      ])
+    })
+  })
+
+  it('registers nothing but reads under /api/public', async () => {
+    await withApp(async (app) => {
+      await app.ready()
+      const writes = registeredRoutes(app)
+        .filter((route) => route.path.startsWith('/api/public/'))
+        .filter((route) => route.method !== 'GET' && route.method !== 'HEAD')
+
+      expect(writes).toEqual([])
+    })
+  })
+})
+
 interface RegisteredRoute {
   method: string
   path: string

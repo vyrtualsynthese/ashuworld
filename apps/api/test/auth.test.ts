@@ -275,7 +275,10 @@ function twitchProvider(verifiedActions: string[]): OAuthProvider {
 
 /** The registry holding one injected provider, so the routes only know that one. */
 function registryOf(provider: OAuthProvider): ProviderRegistry {
-  return { get: (name) => (name === provider.name ? provider : undefined) }
+  return {
+    get: (name) => (name === provider.name ? provider : undefined),
+    names: () => [provider.name],
+  }
 }
 
 /** Runs the start redirect of a handshake and returns its state. */
@@ -559,6 +562,7 @@ describe('GET /auth/:provider/start', () => {
     }
     const registry: ProviderRegistry = {
       get: (name) => (name === 'dev' ? observing : undefined),
+      names: () => ['dev'],
     }
 
     await withApp(

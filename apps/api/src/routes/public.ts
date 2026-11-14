@@ -8,10 +8,17 @@ import {
   type Queryable,
 } from '@ashuworld/ledger'
 import { notFoundBody } from '../errors.js'
+import type { ProviderRegistry } from '../auth/providers.js'
 
 export interface PublicRouteDeps {
   pool: Pool
   cfg: GameConfig
+  /**
+   * The providers this deployment accepts. The capability route lists their names; it is
+   * the same registry the sign-in routes resolve a provider in, so the buttons the page
+   * draws are exactly the doors that will open.
+   */
+  providers: ProviderRegistry
 }
 
 /**
@@ -121,6 +128,16 @@ export function publicGame(cfg: GameConfig): PublicGame {
  * route, so the response cannot be used to discover who has an account.
  */
 export function registerPublicRoutes(app: FastifyInstance, deps: PublicRouteDeps): void {
+  // Which sign-in doors are open here, in the order the page draws them. The answer comes
+  // from the same registry `/auth/:provider/start` resolves against, so a listed name is
+  // a door that will open: a page cannot offer a button whose target answers
+  // `unknown_provider`. Nothing is read from the database and the session is ignored, so
+  // the answer is the same for every caller and changes only on a restart.
+  app.get('/api/public/providers', async (_request, reply) => {
+    reply.header('Cache-Control', PUBLIC_CACHE)
+    return { providers: deps.providers.names() }
+  })
+
   app.get('/api/public/game', async (_request, reply) => {
     reply.header('Cache-Control', PUBLIC_CACHE)
     // The rules are not in the database, but they are read through the same snapshot as

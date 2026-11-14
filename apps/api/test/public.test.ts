@@ -14,6 +14,7 @@ import type { ProviderName } from '@ashuworld/providers'
 import { createTestDb, type TestDb } from '@ashuworld/ledger/testing'
 import type { Env } from '../src/config.js'
 import { buildServer } from '../src/server.js'
+import { createProviderRegistry } from '../src/auth/providers.js'
 import { createSession } from '../src/auth/session.js'
 
 const cfg: GameConfig = {
@@ -554,6 +555,100 @@ describe('GET /api/public/fans/:handle', () => {
       expect(publicKeys(ladder.json()).filter((key) => /email/i.test(key))).toEqual([])
       expect(publicKeys(profile.json()).filter((key) => /email/i.test(key))).toEqual([])
     })
+  })
+})
+
+describe('GET /api/public/providers', () => {
+  it('lists exactly the configured providers in the fixed order', async () => {
+    // Twitch leads because it is the platform the campaign runs on; the dev door is a
+    // backdoor and is listed last even though it is configured first.
+    const env = testEnv({
+      ALLOW_DEV_LOGIN: true,
+      TWITCH_CLIENT_ID: 'c',
+      TWITCH_CLIENT_SECRET: 's',
+      TWITCH_CHANNEL_LOGIN: 'ashuworld',
+    })
+    const app = buildServer({ pool: db.pool, cfg, env })
+    app.log.level = 'silent'
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/public/providers' })
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ providers: ['twitch', 'dev'] })
+      // The answer changes only when a deployment restarts with other credentials, so a
+      // short public window is safe and keeps the page's first call off the origin.
+      expect(res.headers['cache-control']).toBe('public, max-age=15')
+      expect(res.headers['set-cookie']).toBeUndefined()
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('answers an empty list when nothing is configured', async () => {
+    await withApp(async (app) => {
+      const res = await app.inject({ method: 'GET', url: '/api/public/providers' })
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ providers: [] })
+      expect(res.headers['cache-control']).toBe('public, max-age=15')
+    })
+  })
+
+  it('answers the same list whether or not the request carries a session', async () => {
+    const fanId = await seedFan('ashu', 'Ashu')
+    const sessionId = await withTransaction(db.pool, (tx) => createSession(tx, fanId))
+
+    await withApp(async (app) => {
+      const anonymous = await app.inject({ method: 'GET', url: '/api/public/providers' })
+      const signedIn = await app.inject({
+        method: 'GET',
+        url: '/api/public/providers',
+        headers: { cookie: `${COOKIE}=${sessionId}` },
+      })
+
+      expect(signedIn.statusCode).toBe(200)
+      // The session is ignored, not honoured: same bytes, no refreshed or new cookie.
+      expect(signedIn.body).toBe(anonymous.body)
+      expect(signedIn.headers['set-cookie']).toBeUndefined()
+      expect(signedIn.headers['cache-control']).toBe(anonymous.headers['cache-control'])
+    })
+  })
+
+  it('answers without touching the database', async () => {
+    // The list comes from the deployment's configuration, not from a row. A pool that
+    // refuses to hand out a client proves the route never asks: a capability endpoint
+    // that needed the database would take the page down with it.
+    const refusing = {
+      connect: async () => {
+        throw new Error('the capability route must not open a connection')
+      },
+    } as unknown as Pool
+
+    const app = buildServer({ pool: refusing, cfg, env: testEnv() })
+    app.log.level = 'silent'
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/public/providers' })
+      expect(res.statusCode).toBe(200)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('lists the injected registry, so the page is told the doors sign-in accepts', async () => {
+    // The same registry the sign-in routes use is injected here, while the environment
+    // configures nothing at all: what answers is the registry, not the raw environment.
+    const providers = createProviderRegistry({ ALLOW_DEV_LOGIN: true })
+
+    const app = buildServer({ pool: db.pool, cfg, env: testEnv(), providers })
+    app.log.level = 'silent'
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/public/providers' })
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ providers: ['dev'] })
+    } finally {
+      await app.close()
+    }
   })
 })
 
