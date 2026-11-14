@@ -286,7 +286,6 @@ describe('ladder', () => {
 
       // Case and stray whitespace are normalised; storage stays lowercase.
       expect(await profile('  AsHu  ')).toEqual({
-        id: fanId,
         handle: 'ashu',
         displayName: 'Ashu',
         level: 1,
@@ -309,7 +308,6 @@ describe('ladder', () => {
       await penalise(fanId, -250)
 
       expect(await profile('ashu')).toEqual({
-        id: fanId,
         handle: 'ashu',
         displayName: 'Ashu',
         level: 2,
