@@ -1,0 +1,50 @@
+# The validation stack: the same checks CI runs, on your machine, in containers.
+#
+#   bash scripts/check.sh
+#
+# It runs the Node checks against a throwaway Postgres, then lints and renders the chart.
+# Run it before pushing a branch, and before opening a pull request into develop: it is the
+# local mirror of the `verify` and `helm` jobs that the branch protection requires.
+
+name: ashuworld-ci
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ashu
+      POSTGRES_PASSWORD: ashu
+      POSTGRES_DB: ashu
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ashu -d ashu"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  check:
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+    command:
+      - sh
+      - -c
+      - pnpm typecheck && pnpm lint && pnpm test:coverage
+    environment:
+      TEST_DATABASE_URL: postgres://ashu:ashu@db:5432/ashu
+      # Matches CI: a red test must fail the step rather than leave a report behind.
+      CI: "true"
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+  helm:
+    build:
+      context: .
+      dockerfile: docker/helm-check.Dockerfile
+    working_dir: /chart
+    command:
+      - helm lint . && bash test/render.sh
+    volumes:
+      - ./deploy/helm/ashuworld:/chart
