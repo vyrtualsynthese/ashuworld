@@ -36,7 +36,7 @@ Gitmoji prefix, then what changed and why:
 ```
 ✨ feat: detach and identity listing endpoints
 🐛 fix: bind the login handshake to the browser
-📝 docs: fan XP and levels design
+📝 docs: Dachi XP and levels design
 🔧 chore: container images and helm chart
 ⚡️ perf: index the ladder and cache the public reads
 ```
@@ -66,17 +66,22 @@ how clean the code is:
 3. XP only decreases through an explicit punishment entry, with an actor and a reason.
 4. A detach forfeits by marking `forfeited_at`. Rows are never deleted, because the one-time
    keys live in them.
-5. An identity that was ever linked never returns to the free-standing ladder.
-6. A fan holds at most one identity per provider, never ends with zero identities, and can never
-   read or act on another fan's data.
-7. A session cookie is issued only after a provider has proven who the fan is.
+5. An identity that was ever linked never returns to the ladder as an unattached account.
+6. A Dachi holds at most one identity per provider, never ends with zero identities, and can never
+   read or act on another Dachi's data.
+7. A session cookie is issued only after a provider has proven who the Dachi is.
 
 If a change seems to need one of these relaxed, open an issue first. The design document explains
 why each exists.
 
 ## Copy and language
 
-The product speaks to fans, not to engineers. When you write user-facing text:
+The product term is **Dachi**; the plural is **Dachis**. The database and the code still say
+`fan` and `fans` — the `fans` table, `fanId`, `FanIdentity` — and that is deliberate: renaming
+them touches the schema, the JSON and every caller, so it is a separate migration, not part of a
+copy change. In user-facing text, the word is always Dachi.
+
+The product speaks to Dachis, not to engineers. When you write user-facing text:
 
 - Say what happens in plain words: "detaching forfeits this account's XP for good" rather than
   "the association will be removed".

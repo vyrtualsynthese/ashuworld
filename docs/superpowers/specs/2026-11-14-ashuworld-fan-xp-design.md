@@ -1,10 +1,10 @@
-# AshuWorld — fan XP and levels
+# AshuWorld — Dachi XP and levels
 
 Status: draft for approval. Alpha; everything is expected to be wiped before launch.
 
 ## Intent
 
-Fans of the AshuWorld channel (YouTube, Twitch) earn XP for what they do for the
+Dachis of the AshuWorld channel (YouTube, Twitch) earn XP for what they do for the
 channel, level up, and can show that level wherever they appear. Today a level is
 only a badge: status, not power. The rules must leave room for gameplays later
 without a rewrite.
@@ -14,19 +14,19 @@ channel into a farm for a number nobody trusts.
 
 ## Goals
 
-- One fan identity that spans providers, with explicit link, merge and detach.
+- One Dachi identity that spans providers, with explicit link, merge and detach.
 - XP awarded automatically from platform events. Phase one is one-time actions only.
 - Abuse handled by construction, not by moderation after the fact: a one-time action
   can credit once per provider identity.
 - XP never decreases except by an explicit punishment, and a level is never lost.
-- A fan can see their level, and later a bot or overlay can read it from the API.
+- A Dachi can see their level, and later a bot or overlay can read it from the API.
 - Runs in the operator's Kubernetes cluster: container images, a Helm chart, GitHub
   Actions for build and test.
 - Alpha data can be wiped cheaply and safely.
 
 ## Non-goals
 
-- Spendable currency, shop, perks, subscribers-only content.
+- A shop, perks or subscribers-only content bought with XP: XP is a level, not a currency.
 - Repeating earn sources (chat messages, watch time, raid participation). Phase two.
 - Twitch chat bot, Discord bot roles, stream overlay. Phase two; the API must permit
   them, nothing more.
@@ -37,13 +37,13 @@ channel into a farm for a number nobody trusts.
 
 ## Anti-goals — fails even if it technically works
 
-- A fan earns the same one-time action twice by unfollowing and refollowing, by
+- A Dachi earns the same one-time action twice by unfollowing and refollowing, by
   detaching and re-attaching, or by linking a second identity of the same provider.
-- A fan ends up in someone else's account, or an attached provider account can be claimed
-  a second time by another fan.
-- A fan loses a level because of a detach, a punishment, or a change to the XP table.
-- An identity that was ever linked to an account reappears on the free-standing ladder,
-  or a detach leaves phantom XP behind.
+- A Dachi ends up in someone else's account, or an attached provider account can be claimed
+  a second time by another Dachi.
+- A Dachi loses a level because of a detach, a punishment, or a change to the XP table.
+- An identity that was ever linked to an account reappears on the public ladder as an
+  unattached account, or a detach leaves phantom XP behind.
 - A crash or a retried webhook loses or duplicates an award.
 
 ## Constraints
@@ -59,8 +59,8 @@ channel into a farm for a number nobody trusts.
   - Twitch chat and YouTube chat: events available (phase two).
   - Discord: bot sees membership of the operator's server; no notion of "following".
   - YouTube subscription: not observable from the channel side, but observable from the
-    fan's side: with the fan's own token, `subscriptions.list(mine=true)` reports the
-    channels they follow. Verification is per fan, at link time and on a poll, and fails
+    Dachi's side: with the Dachi's own token, `subscriptions.list(mine=true)` reports the
+    channels they follow. Verification is per Dachi, at link time and on a poll, and fails
     closed when the list comes back empty or unreadable.
   - Instagram, X, TikTok, Bluesky: no usable follower API. **Excluded from alpha** — no
     claims, no self-declared XP. Every alpha action is verified by the platform that owns
@@ -93,7 +93,7 @@ the ledger.
 | Component | Role |
 |---|---|
 | `web` | React + Vite single-page app. Public profile, ladder, account linking, admin views. Static, served by nginx. |
-| `api` | Fastify. OAuth login and linking, sessions, fan reads, admin actions, and the writes that fan actions produce: link, detach, penalty. |
+| `api` | Fastify. OAuth login and linking, sessions, Dachi reads, admin actions, and the writes that Dachi actions produce: link, detach, penalty. |
 | `worker` | Platform connectors (Twitch EventSub receiver + follower poller, Discord gateway), the awarding pipeline, outbox consumer, and the writes that platform events produce. |
 | `packages/ledger` | Domain rules and SQL: award, merge, detach, punishment, level. No HTTP, no platform code. |
 | `packages/providers` | One adapter per platform: identity, verified events, login. |
@@ -101,19 +101,19 @@ the ledger.
 
 Sessions live in Postgres (one less component at alpha). OAuth only: Twitch, Google and
 Discord, no passwords. Google is there for exactly one reason — it is the only way to see
-whether a fan follows the YouTube channel — and a Google-only account still gets a profile
+whether a Dachi follows the YouTube channel — and a Google-only account still gets a profile
 like any other.
 
 Write ownership is by kind of entry, not by one blessed service: `worker` owns the
 verified-earn transaction (award plus inbound event marked processed), `api` owns the
-writes a fan or the operator triggers (link, detach, penalty). Both call
+writes a Dachi or the operator triggers (link, detach, penalty). Both call
 `packages/ledger`, which is compiled into each image and talks to the same Postgres, so
 no award crosses a network call and "exactly once" stays inside one transaction. What
 must never happen is a third writer: no connector, no script, no manual SQL.
 
-### Login and linking — one fan, many doors
+### Login and linking — one Dachi, many doors
 
-A fan joins with one provider and links the rest. From then on **any attached identity is
+A Dachi joins with one provider and links the rest. From then on **any attached identity is
 a valid login and all of them land on the same profile**: same handle, same level, same
 balance. Discord-attached first, then Twitch and YouTube linked, and all three are doors
 to the same account.
@@ -124,10 +124,10 @@ to the same account.
    the person behind it already has a profile.
 3. **Login with a detached identity** → one confirmation before it attaches again:
    "this account was detached; its past XP is gone". Accept and it is a door again with
-   the forfeit intact. Decline and the fan is shown the sign-in choice again. It is never
+   the forfeit intact. Decline and the Dachi is shown the sign-in choice again. It is never
    silent, which is what keeps a detach meaningful.
 4. **Attaching an identity that already belongs to another account** → refused, always,
-   even if the other account is inactive. Otherwise one fan can take over another's
+   even if the other account is inactive. Otherwise one Dachi can take over another Dachi's
    ladder history by linking their provider account.
 5. **The last attached identity cannot be detached.** Refused with the reason: it is the
    only way into the account, and detaching it would leave an account nobody can log into
@@ -149,13 +149,13 @@ inbound_events    id, provider, event_id, payload, received_at, processed_at
 ```
 
 A check constraint keeps exactly one of `identity_id` and `fan_id` set on an entry:
-an earn always names the identity that produced it, a penalty always names the fan.
+an earn always names the identity that produced it, a penalty always names the Dachi.
 
 Rules the ledger must satisfy, at all times:
 
 1. **Attribution.** Every earn names the provider identity that produced it. An
    account's balance is the sum of entries of its currently linked identities, plus
-   fan-level entries, which are penalties. Penalties therefore survive a detach:
+   account-level entries, which are penalties. Penalties therefore survive a detach:
    detaching an identity takes that identity's earns off the balance and nothing else.
 2. **One-time earns.** A unique constraint on `(identity_id, action_key)` for
    `kind = 'earn'`. Unfollow, refollow and re-link cannot credit twice; that is the
@@ -168,7 +168,7 @@ Rules the ledger must satisfy, at all times:
    account therefore brings back nothing; linking a different account brings that
    account's own earns. `peak_xp` is untouched, so the badge stays. One account holds at
    most one identity per provider: linking a second Twitch identity while one is attached
-   is refused, and the fan must detach first.
+   is refused, and the Dachi must detach first.
 4. **Level is a high-water mark.** `peak_xp` is the highest account total ever
    observed, written monotonically forward, and `level` is derived from `peak_xp`.
    Detach, punishment and table changes lower the balance but cannot lower the badge.
@@ -180,23 +180,31 @@ Rules the ledger must satisfy, at all times:
    one transaction.
 7. **Once linked, never free-standing.** `first_linked_at` is stamped the first time an
    identity joins an account and never cleared. An identity with a `first_linked_at` is
-   not on the free-standing ladder, ever again — not after a detach, not after a forfeit.
+   not on the public ladder as an unattached account, ever again — not after a detach, not
+   after a forfeit.
    The identity still exists internally, keeps its spent one-time keys, and can be linked
    again; it simply has no public life of its own once it has been part of an account.
 
 ### The ladder before anyone links anything
 
 An identity is awarded XP from the moment its first verified event arrives, whether or
-not any fan account exists for it yet. That is what makes "before linking, accounts
+not any Dachi account exists for it yet. That is what makes "before linking, accounts
 count as separated on the ladder" true rather than aspirational: `fans` rows are created
-at first login, identity rows at first contact, and the alpha ladder shows two lists —
-free-standing identities that have **never** been linked (ranked by their own earn total,
-labelled with the provider handle, no profile page) and linked fans (ranked by account
-balance).
+at first login, identity rows at first contact, and the ladder is one ranked table holding
+both kinds of account:
+
+- a **Dachi** row: handle, level badge, XP, and a link to `/f/<handle>`;
+- an **unattached account** row: provider label, provider handle and XP, with no level and
+  no profile page, because it has never belonged to a Dachi.
+
+The api still answers two lists — `linked` and `freeStanding` — from one snapshot, because
+the ledger distinguishes them. The page merges them into one table: rank 1 is whoever has
+the most XP, whether or not that account has a Dachi yet. Rows are ordered by XP
+descending, then by display name ascending in French, so equal totals keep a stable order.
 
 Ranking uses the current balance, not `peak_xp`: the ladder is about who is contributing
 now, the badge is about how far you have come. Detached identities forfeit their earns
-and never return to the free-standing list; from the outside, they are gone.
+and never return to the ladder; from the outside, they are gone.
 
 ### Queue
 
@@ -221,13 +229,13 @@ connector → inbound_events (raw, deduplicated)
           → update account totals and peak → outbox row for side effects
 ```
 
-Side effects later (bot message, role grant) consume the outbox; the fan-facing award
+Side effects later (bot message, role grant) consume the outbox; the Dachi-facing award
 never waits on a third-party call.
 
 ### Level and action table
 
 A versioned file, loaded at start: action keys with values, plus a level table
-(threshold XP per level). Fans' `level` is recomputed on change and only ever rises for a
+(threshold XP per level). A Dachi's `level` is recomputed on change and only ever rises for a
 given `peak_xp`. Numbers are a separate gameplay pass; this design fixes the structure,
 not the values.
 
@@ -236,13 +244,13 @@ Alpha actions, all verified by the platform that owns them:
 | Action | Provider | Detection |
 |---|---|---|
 | Followed the channel | Twitch | EventSub `channel.follow`, follower poll as the fallback |
-| Subscribed to the channel | YouTube | `subscriptions.list(mine=true)` with the fan's own grant, at link and on a poll |
+| Subscribed to the channel | YouTube | `subscriptions.list(mine=true)` with the Dachi's own grant, at link and on a poll |
 | Member of the Discord server | Discord | Bot gateway, membership sync on boot |
 
 ### Display
 
 - `/f/<handle>` public profile: level, total XP, provider badges, earned actions.
-- `/ladder` ranked board, split "linked" and "unlinked" rows while alpha runs.
+- `/ladder` one ranked table of Dachis and unattached accounts, sorted by XP.
 - `GET /api/public/fans/<handle>` — level, peak XP, balance, badges. This is the
   contract Twitch/Discord bots and overlays consume in phase two.
 
@@ -260,7 +268,7 @@ Alpha actions, all verified by the platform that owns them:
 No roles table at alpha. An allowlist of provider identities in the chart's values
 (`admin_identities`) is checked after login; the allowlist is the operator and any mod
 they add. Consequences: no bootstrap problem, no admin UI to build, and the audit trail
-records the acting fan. Moving to a role column later is a migration, not a redesign.
+records the acting Dachi. Moving to a role column later is a migration, not a redesign.
 
 ### Kubernetes, images and CI
 
@@ -299,7 +307,7 @@ no claims, no self-declared XP. An action either is verified by the platform tha
 or it is not in the game. If one becomes readable later, it enters as a new adapter with
 no change to the ledger.
 
-A consequence worth naming: a fan can be told "follow me on Instagram for XP" only if a
+A consequence worth naming: a Dachi can be told "follow me on Instagram for XP" only if a
 human pays the reward, and that is a penalty-style manual entry, not an earn.
 
 ### Alpha reset
@@ -310,19 +318,19 @@ version. Safe because nothing outside the ledger depends on XP yet.
 
 ## Accepted consequences
 
-**No account merge, by decision.** A fan who signs in with Twitch one week and Discord the
+**No account merge, by decision.** A Dachi who signs in with Twitch one week and Discord the
 next owns two accounts, each with its own level, and cannot join them himself. That is
 accepted for alpha rather than fixed: repairs are an audited operator action ("move this
 identity to that account"), and the alpha wipe ends the problem. If repairs turn out to be
 routine, self-serve merge is a later design of its own, not a checkbox.
 
-**The Google scope has a gate.** Reading a fan's subscriptions needs `youtube.readonly`,
+**The Google scope has a gate.** Reading a Dachi's subscriptions needs `youtube.readonly`,
 which Google treats as sensitive: an unverified app is limited to a small number of test
 users, and raising that limit means a verification review. Consequence: the YouTube action
 may stay behind that limit during alpha, and nothing else in the game depends on it —
 Twitch and Discord carry the feature. The risk is calendar time, not architecture.
 
-**No merge means no `peak_xp` reconciliation.** One fan, one peak. If an operator repair
+**No merge means no `peak_xp` reconciliation.** One Dachi, one peak. If an operator repair
 ever joins two accounts, the surviving profile keeps the higher peak, because a level is
 never taken away.
 
