@@ -1029,8 +1029,8 @@ git add apps/web && git commit -m "✨ feat: web app with ladder, profile and ac
 - Test: `apps/worker/test/loop.test.ts`
 
 **Interfaces:**
-- Consumes: `ingestEvent`, `awardOnce`, `ensureIdentity`.
-- Produces: `type Processor = (tx: Queryable, payload: unknown) => Promise<void>`; `processOne(pool: Pool, processors: Map<ProviderName, Processor>): Promise<'processed' | 'duplicate' | 'empty'>` — claims the oldest unprocessed `inbound_events` row with `for update skip locked`, runs the processor through `ingestEvent`, and leaves the row processed; `runLoop(pool, processors, opts): Promise<void>` polls every `intervalMs` (default 1000) until the abort signal fires.
+- Consumes: `awardOnce`, `ensureIdentity`, `withTransaction`, `Queryable`.
+- Produces: `type Processor = (tx: Queryable, payload: unknown) => Promise<void>`; `processOne(pool: Pool, processors: Map<ProviderName, Processor>): Promise<'processed' | 'duplicate' | 'empty'>` — claims the oldest unprocessed `inbound_events` row with `for update skip locked`, runs the processor inside the same transaction, increments `attempts` and leaves `processed_at` null when the processor throws, and sets `processed_at` when it succeeds. It must **not** go through `ingestEvent`: that function treats an existing `(provider, event_id)` as a duplicate and would skip the handler, which is exactly the retry this function exists for. `'duplicate'` is returned only when the claimed row was already processed by a concurrent worker.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1055,7 +1055,9 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement**
 
-The claim is `select * from inbound_events where processed_at is null order by id for update skip locked limit 1` inside `withTransaction`; `attempts` increments on failure, and after 5 attempts the row is left for the operator (no dead-letter table at alpha; the log line names the id).
+The claim is `select * from inbound_events where processed_at is null order by id for update skip locked limit 1` inside `withTransaction`. The processor runs on the claimed row's payload in that same transaction: on success set `processed_at = now()` and commit; on throw roll back the processor's writes, then run a second small transaction that only does `update inbound_events set attempts = attempts + 1 where id = $1`, and return `'empty'` so the loop can pick the next row. After 5 attempts the row still stays unprocessed but is logged once per attempt with its id; there is no dead-letter table at alpha, and the operator sees it in the log.
+
+`ingestEvent` is deliberately not involved here: it exists for first arrival, and it treats an existing `(provider, event_id)` as a duplicate without calling the handler.
 
 - [ ] **Step 4: Run tests**
 
