@@ -16,9 +16,12 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
+    // `API_PROXY_TARGET` lets the same config serve a container (where the api is another
+    // host, `http://api:3000`) and a bare `pnpm dev` (where it is localhost). The browser
+    // still sees one origin, so the HttpOnly session cookie stays first-party either way.
     proxy: {
-      '/api': 'http://localhost:3000',
-      '/auth': 'http://localhost:3000',
+      '/api': process.env['API_PROXY_TARGET'] ?? 'http://localhost:3000',
+      '/auth': process.env['API_PROXY_TARGET'] ?? 'http://localhost:3000',
     },
   },
   test: {

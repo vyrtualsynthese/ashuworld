@@ -83,7 +83,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     // address the log records.
     trustProxy: env.TRUST_PROXY,
     logger: {
-      level: 'info',
+      level: env.LOG_LEVEL ?? 'info',
       // Fastify logs `req` for every request and again for the response; without this
       // serializer the callback's query string, and with it the code and state, would be
       // written twice per sign-in.
