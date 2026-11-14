@@ -419,7 +419,7 @@ git add packages/ledger && git commit -m "✨ feat: ledger schema and migration 
 **Interfaces:**
 - Consumes: `Queryable`, `withTransaction`, `actionAmount`, `GameConfig`.
 - Produces: `ensureIdentity(tx: Queryable, p: IdentityProfile): Promise<{ id: string }>` — inserts or finds by `(provider, external_id)`.
-- Produces: `awardOnce(tx: Queryable, input: { identityId: string; provider: ProviderName; actionKey: string; amount: number; idempotencyKey: string }): Promise<{ awarded: boolean; entryId: string | null }>` — returns `{ awarded: false, entryId: existingId }` when the one-time key is spent or the idempotency key was seen.
+- Produces: `awardOnce(tx: Queryable, input: { identityId: string; provider: ProviderName; actionKey: string; amount: number; idempotencyKey: string }): Promise<{ awarded: boolean; entryId: string | null; reason: 'awarded' | 'action_spent' | 'key_seen' }>` — `reason` names why a refusal happened, because "already earned this action" and "this key was used by a different identity" are different bugs. When neither read-back finds the conflicting row, throw `AwardConflictError` rather than reporting a refusal: an unmodelled unique conflict means the schema grew a constraint the code does not know, and a silent `awarded: false` would stop paying fans with no log.
 - Produces: `ingestEvent(pool: Pool, input: { provider: ProviderName; eventId: string; payload: unknown; handler: (tx: Queryable, payload: unknown) => Promise<void> }): Promise<'processed' | 'duplicate'>`.
 
 - [ ] **Step 1: Write the failing tests**
