@@ -13,7 +13,7 @@ import {
   type Queryable,
   type Standing,
 } from '../src/index.js'
-import { createTestDb, type TestDb } from './helpers/db.js'
+import { createTestDb, type TestDb } from '@ashuworld/ledger/testing'
 
 // The level table is what turns a peak into a badge; the action amounts are round
 // numbers that stack to level 1 (100) and then to level 2 (300).

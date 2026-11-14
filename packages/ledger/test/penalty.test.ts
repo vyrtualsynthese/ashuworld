@@ -15,7 +15,7 @@ import {
   type Queryable,
   type Standing,
 } from '../src/index.js'
-import { createTestDb, type TestDb } from './helpers/db.js'
+import { createTestDb, type TestDb } from '@ashuworld/ledger/testing'
 
 // Same table as the other ledger suites: 50 + 100 reaches level 1 (100 xp), and 300 is
 // level 2, so a penalty can lower the balance below 100 without touching the badge.

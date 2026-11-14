@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { createTestDb, type TestDb } from './helpers/db.js'
+import { createTestDb, type TestDb } from '@ashuworld/ledger/testing'
 import { migrate, migrationFiles } from '../src/migrate.js'
 
 function first<T>(rows: T[]): T {

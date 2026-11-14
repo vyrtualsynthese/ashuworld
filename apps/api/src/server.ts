@@ -6,6 +6,7 @@ import { AwardConflictError, HandleTakenError, PenaltyError } from '@ashuworld/l
 import type { Env } from './config.js'
 import { errorBody } from './errors.js'
 import { registerHealthRoutes } from './routes/health.js'
+import { registerMeRoutes } from './routes/me.js'
 
 export interface ServerDeps {
   pool: Pool
@@ -43,11 +44,12 @@ const NOT_FOUND_MESSAGE = 'the requested resource does not exist'
  * would mean changing every call site.
  */
 export function buildServer(deps: ServerDeps): FastifyInstance {
-  const { pool } = deps
+  const { pool, env } = deps
   const app = Fastify({ logger: true })
 
-  // Sessions arrive in Task 9. Registering the plugin now means the cookie decorators
-  // exist from the first route that needs them instead of appearing as a surprise.
+  // Sessions arrive in the cookie `requireFan` reads, and leave in the one logout clears.
+  // Registering the plugin here means every route that needs `reply.setCookie` or
+  // `request.cookies` shares the same parser and serializer.
   app.register(cookie)
 
   /**
@@ -110,5 +112,6 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   })
 
   registerHealthRoutes(app, pool)
+  registerMeRoutes(app, { pool, env })
   return app
 }
