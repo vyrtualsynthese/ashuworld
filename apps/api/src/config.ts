@@ -21,7 +21,19 @@ export interface Env {
   TRUST_PROXY: boolean
   PUBLIC_BASE_URL: string
   PORT: number
+  /**
+   * Pino log level. Optional so tests and callers that build a server directly keep the
+   * default; the process entry point reads it from `LOG_LEVEL`, and a development stack
+   * sets it to `debug` to see the request and error detail.
+   */
+  LOG_LEVEL?: LogLevel
 }
+
+/** The levels pino accepts. Kept explicit so a typo fails at startup, not silently at run time. */
+export type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent'
+
+const LOG_LEVELS: readonly LogLevel[] = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']
+const DEFAULT_LOG_LEVEL: LogLevel = 'info'
 
 const DEFAULT_SESSION_COOKIE_NAME = 'ashuworld_session'
 const DEFAULT_PORT = 3000
@@ -62,6 +74,19 @@ function port(raw: NodeJS.ProcessEnv): number {
   return parsed
 }
 
+/** The pino level, defaulting to `info`. An unknown level is a startup error, not a silent `info`. */
+function logLevel(raw: NodeJS.ProcessEnv): LogLevel {
+  const value = raw['LOG_LEVEL']
+  if (value === undefined || value.trim() === '') return DEFAULT_LOG_LEVEL
+  const normalised = value.trim().toLowerCase()
+  if (!(LOG_LEVELS as readonly string[]).includes(normalised)) {
+    throw new Error(
+      `LOG_LEVEL must be one of ${LOG_LEVELS.join(', ')}, got ${JSON.stringify(value)}`,
+    )
+  }
+  return normalised as LogLevel
+}
+
 /**
  * Reads the environment. Takes `raw` so a test can prove the defaults without mutating
  * the process it runs in; the default argument is what `src/index.ts` uses.
@@ -87,5 +112,6 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
     TRUST_PROXY: flag(raw, 'TRUST_PROXY', false),
     PUBLIC_BASE_URL: publicBaseUrl,
     PORT: port(raw),
+    LOG_LEVEL: logLevel(raw),
   }
 }

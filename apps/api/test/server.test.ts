@@ -161,6 +161,7 @@ describe('loadEnv', () => {
       ALLOW_DEV_LOGIN: false,
       TRUST_PROXY: false,
       PORT: 3000,
+      LOG_LEVEL: 'info',
     })
   })
 
@@ -168,6 +169,16 @@ describe('loadEnv', () => {
     expect(loadEnv({ ...required, PUBLIC_BASE_URL: 'http://localhost:3000' })).toMatchObject({
       COOKIE_SECURE: false,
     })
+  })
+
+  it('defaults the log level to info and accepts an explicit one', () => {
+    expect(loadEnv(required)).toMatchObject({ LOG_LEVEL: 'info' })
+    expect(loadEnv({ ...required, LOG_LEVEL: 'debug' })).toMatchObject({ LOG_LEVEL: 'debug' })
+    expect(loadEnv({ ...required, LOG_LEVEL: 'DEBUG' })).toMatchObject({ LOG_LEVEL: 'debug' })
+  })
+
+  it('rejects an unknown log level instead of silently logging at info', () => {
+    expect(() => loadEnv({ ...required, LOG_LEVEL: 'verbose' })).toThrow(/LOG_LEVEL/)
   })
 
   it('recognises https whatever its case', () => {
@@ -197,6 +208,7 @@ describe('loadEnv', () => {
         ALLOW_DEV_LOGIN: 'TRUE',
         TRUST_PROXY: 'true',
         PORT: '8080',
+        LOG_LEVEL: 'debug',
       }),
     ).toEqual({
       ...required,
@@ -205,6 +217,7 @@ describe('loadEnv', () => {
       ALLOW_DEV_LOGIN: true,
       TRUST_PROXY: true,
       PORT: 8080,
+      LOG_LEVEL: 'debug',
     })
   })
 

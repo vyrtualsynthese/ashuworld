@@ -1,0 +1,110 @@
+# The development stack: everything running, everything watching.
+#
+#   pnpm install                 # once, on the host: the containers use this dependency tree
+#   docker compose -f compose.dev.yaml up --build
+#   open http://localhost:5173
+#
+# Every service mounts the repository, so a save in the editor is picked up by `tsx watch`
+# (api, worker) or by Vite (web) without restarting a container. The API and the worker also
+# open a Node inspector, so a debugger can attach to localhost:9229 and localhost:9230.
+#
+# This is a development file, not a deployment: the dev sign-in is on, cookies are not
+# Secure (plain HTTP), and the log level is debug.
+
+name: ashuworld-dev
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ashu
+      POSTGRES_PASSWORD: ashu
+      POSTGRES_DB: ashu
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-dev-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ashu -d ashu"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+    command: ["pnpm", "exec", "tsx", "apps/api/src/migrate-cli.ts"]
+    environment:
+      DATABASE_URL: postgres://ashu:ashu@db:5432/ashu
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+    command: ["pnpm", "exec", "tsx", "watch", "--inspect=0.0.0.0:9229", "apps/api/src/index.ts"]
+    environment:
+      DATABASE_URL: postgres://ashu:ashu@db:5432/ashu
+      PUBLIC_BASE_URL: http://localhost:5173
+      SESSION_COOKIE_NAME: ashuworld_session
+      COOKIE_SECURE: "false"
+      ALLOW_DEV_LOGIN: "true"
+      TRUST_PROXY: "false"
+      PORT: "3000"
+      LOG_LEVEL: debug
+    ports:
+      - "3000:3000"
+      - "9229:9229"
+    volumes:
+      - .:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+    command: ["pnpm", "exec", "tsx", "watch", "--inspect=0.0.0.0:9230", "apps/worker/src/index.ts"]
+    environment:
+      DATABASE_URL: postgres://ashu:ashu@db:5432/ashu
+    volumes:
+      - .:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+    command: ["pnpm", "--filter", "@ashuworld/web", "dev", "--host", "0.0.0.0"]
+    environment:
+      # The browser talks to Vite; Vite forwards /api and /auth to the api container.
+      API_PROXY_TARGET: http://api:3000
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+    depends_on:
+      - api
+
+volumes:
+  db-dev-data:
