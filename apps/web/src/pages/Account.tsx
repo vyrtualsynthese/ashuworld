@@ -108,8 +108,10 @@ function ReattachPanel({ provider }: { provider: string }) {
  *
  * The detach that sent them here ended the session with it, so the signed-in panel cannot
  * be shown. Saying nothing would leave the most consequential fact unsaid: signing in
- * with this provider does not restore what it earned. The notice comes before the sign-in
- * panel so it is read before the button that acts on it.
+ * with this provider does not restore what it earned, and sending the fan down that route
+ * again only returns them to this page. So the notice names the path that works: sign in
+ * with an account that is still attached, then attach this one. It comes before the
+ * sign-in panel so it is read before the button that acts on it.
  */
 function SignedOutDetachedNotice({ provider }: { provider: string }) {
   const label = providerLabel(provider)
@@ -119,7 +121,13 @@ function SignedOutDetachedNotice({ provider }: { provider: string }) {
       <h2 id="signed-out-detached-heading">Your {label} account is detached</h2>
       <p>
         {label} was detached from its AshuWorld account, and the XP it earned is forfeited
-        for good. Signing in with {label} again attaches it as a fresh, empty account; the
+        for good.
+      </p>
+      <p>
+        Signing in with {label} again does not bring it back: that route ends without a
+        session and returns to this page. To attach it again, first sign in with an account
+        that is still attached. Then start a fresh {label} sign-in and choose to attach
+        that account. It comes back as a new, empty account, with none of its old XP. The
         forfeit cannot be undone.
       </p>
     </section>
