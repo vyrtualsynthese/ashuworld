@@ -47,3 +47,12 @@ export {
   type AddPenaltyInput,
   type PenaltyErrorCode,
 } from './penalty.js'
+export {
+  ALPHA_RESET_CONFIRM_ENV,
+  ALPHA_RESET_CONFIRM_VALUE,
+  AlphaResetError,
+  resetAlpha,
+  type AlphaResetErrorCode,
+  type ResetAlphaInput,
+  type ResetAlphaResult,
+} from './reset.js'
