@@ -66,7 +66,7 @@ export const MENTIONS_LEGALES: LegalDocument = {
     {
       heading: 'Hébergement',
       paragraphs: [
-        `${COMPANY.name} assure l’auto-hébergement du site : le service est exploité sur l’infrastructure privée de l’éditeur, en France.`,
+        `Le site est hébergé par ${COMPANY.host}, en France.`,
         'Aucun hébergeur tiers n’intervient. Le siège social indiqué ci-dessus est celui de l’éditeur ; ce n’est pas l’adresse de la machine, dont l’emplacement physique n’est pas publié.',
       ],
     },
@@ -89,7 +89,7 @@ export const MENTIONS_LEGALES: LegalDocument = {
     {
       heading: 'Liens externes',
       paragraphs: [
-        'Le site renvoie vers des plateformes tierces, chacune pour un usage précis : Twitch et Discord servent à la connexion et à la vérification des actions ; Google sert à la connexion ; YouTube sert à vérifier l’abonnement à la chaîne, à travers le compte Google.',
+        'Le site renvoie vers des plateformes tierces, chacune pour un usage précis : Twitch et Discord servent à la connexion et à la vérification des actions ; Google sert à la connexion ; YouTube sert, lorsque cette connexion est activée, à vérifier l’abonnement à la chaîne à travers le compte Google.',
         'Ces plateformes ont leurs propres conditions d’utilisation et leur propre politique de confidentialité. L’éditeur ne les contrôle pas et n’est pas responsable de leur contenu ni de leurs pratiques.',
       ],
     },
@@ -197,7 +197,7 @@ export const CONFIDENTIALITE: LegalDocument = {
     {
       heading: 'Cookies et traceurs',
       paragraphs: [
-        'Le site dépose deux cookies, tous deux strictement nécessaires à son fonctionnement. Leur nom, leur rôle et leur durée de vie sont les suivants.',
+        'Le site dépose deux cookies, tous deux strictement nécessaires à son fonctionnement.',
         'Aucun traceur publicitaire, analytique ou de réseau social n’est déposé, et aucune donnée n’est transmise à un tiers à cette fin.',
         'Ces deux cookies étant strictement nécessaires, ils ne demandent pas de consentement : c’est pourquoi le site n’affiche pas de bandeau de cookies.',
       ],
