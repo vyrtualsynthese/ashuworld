@@ -41,6 +41,7 @@ function testEnv(overrides: Partial<Env> = {}): Env {
     SESSION_COOKIE_NAME: 'ashuworld_session',
     COOKIE_SECURE: false,
     ALLOW_DEV_LOGIN: false,
+    TRUST_PROXY: false,
     PUBLIC_BASE_URL: 'http://localhost:3000',
     PORT: 3000,
     ...overrides,
@@ -158,6 +159,7 @@ describe('loadEnv', () => {
       SESSION_COOKIE_NAME: 'ashuworld_session',
       COOKIE_SECURE: true,
       ALLOW_DEV_LOGIN: false,
+      TRUST_PROXY: false,
       PORT: 3000,
     })
   })
@@ -193,6 +195,7 @@ describe('loadEnv', () => {
         SESSION_COOKIE_NAME: 'ashu_dev',
         COOKIE_SECURE: 'true',
         ALLOW_DEV_LOGIN: 'TRUE',
+        TRUST_PROXY: 'true',
         PORT: '8080',
       }),
     ).toEqual({
@@ -200,8 +203,17 @@ describe('loadEnv', () => {
       SESSION_COOKIE_NAME: 'ashu_dev',
       COOKIE_SECURE: true,
       ALLOW_DEV_LOGIN: true,
+      TRUST_PROXY: true,
       PORT: 8080,
     })
+  })
+
+  it('defaults TRUST_PROXY off and rejects a value that is not a boolean', () => {
+    expect(loadEnv(required)).toMatchObject({ TRUST_PROXY: false })
+    expect(loadEnv({ ...required, TRUST_PROXY: 'false' })).toMatchObject({ TRUST_PROXY: false })
+    expect(loadEnv({ ...required, TRUST_PROXY: ' TRUE ' })).toMatchObject({ TRUST_PROXY: true })
+    expect(loadEnv({ ...required, TRUST_PROXY: ' ' })).toMatchObject({ TRUST_PROXY: false })
+    expect(() => loadEnv({ ...required, TRUST_PROXY: 'yes' })).toThrow(/TRUST_PROXY/)
   })
 
   it('trims required values like the other readers do', () => {
@@ -519,6 +531,37 @@ describe('error shape', () => {
     } finally {
       await app.close()
     }
+  })
+
+  it('takes the client address from the forwarding header only when TRUST_PROXY is on', async () => {
+    // Behind an ingress, `request.ip` is the proxy unless the deployment trusts the
+    // header. Off by default: a caller must not be able to choose the logged address.
+    const addressFor = async (trustProxy: boolean): Promise<string | undefined> => {
+      const lines: string[] = []
+      const app = buildServer({
+        pool,
+        cfg,
+        env: testEnv({ TRUST_PROXY: trustProxy }),
+        logStream: { write: (line) => lines.push(line) },
+      })
+      try {
+        const res = await app.inject({
+          method: 'GET',
+          url: '/api/health',
+          headers: { 'x-forwarded-for': '203.0.113.9' },
+        })
+        expect(res.statusCode).toBe(200)
+        const entries = lines
+          .map((line) => JSON.parse(line) as { req?: { url: string; remoteAddress?: string } })
+          .filter((entry) => entry.req?.url === '/api/health')
+        return entries[0]?.req?.remoteAddress
+      } finally {
+        await app.close()
+      }
+    }
+
+    await expect(addressFor(false)).resolves.toBe('127.0.0.1')
+    await expect(addressFor(true)).resolves.toBe('203.0.113.9')
   })
 })
 

@@ -46,6 +46,7 @@ function testEnv(overrides: Partial<Env> = {}): Env {
     SESSION_COOKIE_NAME: 'ashuworld_session',
     COOKIE_SECURE: false,
     ALLOW_DEV_LOGIN: false,
+    TRUST_PROXY: false,
     PUBLIC_BASE_URL: 'http://localhost:3000',
     PORT: 3000,
     ...overrides,

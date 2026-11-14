@@ -38,6 +38,7 @@ function testEnv(overrides: Partial<Env> = {}): Env {
     SESSION_COOKIE_NAME: COOKIE,
     COOKIE_SECURE: false,
     ALLOW_DEV_LOGIN: false,
+    TRUST_PROXY: false,
     PUBLIC_BASE_URL: 'http://localhost:3000',
     PORT: 3000,
     ...overrides,
@@ -504,6 +505,22 @@ describe('GET /api/me/identities', () => {
 })
 
 describe('no attach endpoint', () => {
+  it('registers no non-GET route under /api/me/identities except the detach', async () => {
+    // A single 404 for `…/reattach` proves one URL, not the invariant: a later
+    // `POST …/:id/attach`, `PUT …/:id`, or `POST …/link` would pass every other test.
+    // The registered route table is the only place the whole surface can be seen.
+    await withApp(async (app) => {
+      await app.ready()
+      const writes = registeredRoutes(app)
+        .filter((route) => route.path === '/api/me/identities' || route.path.startsWith('/api/me/identities/'))
+        .filter((route) => route.method !== 'GET' && route.method !== 'HEAD')
+
+      expect(writes).toEqual([
+        { method: 'POST', path: '/api/me/identities/:identityId/detach' },
+      ])
+    })
+  })
+
   it('answers 404 for a reattach request, even with a live session', async () => {
     const fanId = await seedFan()
     const identityId = await seedIdentity(fanId)
@@ -547,23 +564,63 @@ describe('no attach endpoint', () => {
   })
 })
 
+interface RegisteredRoute {
+  method: string
+  path: string
+}
+
+/**
+ * The registered route table, read from Fastify's documented `printRoutes` output.
+ *
+ * `commonPrefix: false` prints one line per handler, indented one level per path
+ * fragment; joining the fragments by depth reconstructs the full path. A line this
+ * cannot parse throws rather than being skipped, so a formatting change fails the test
+ * instead of quietly shrinking the set it asserts over.
+ */
+function registeredRoutes(app: FastifyInstance): RegisteredRoute[] {
+  const tree = app.printRoutes({ commonPrefix: false })
+  const routes: RegisteredRoute[] = []
+  const fragments: string[] = []
+
+  for (const line of tree.split('\n')) {
+    if (line.trim() === '') continue
+    const match = /^((?:[│ ] {3})*)[├└]── (\S+) \(([^)]+)\)$/.exec(line)
+    if (match === null) throw new Error(`unparsed route table line: ${JSON.stringify(line)}`)
+
+    const depth = (match[1] ?? '').length / 4
+    fragments[depth] = match[2] ?? ''
+    fragments.length = depth + 1
+    const path = fragments.join('')
+    for (const method of (match[3] ?? '').split(', ')) routes.push({ method, path })
+  }
+
+  return routes
+}
+
 /**
  * Waits until the detach request's backend is blocked on a lock. Polling the database is
  * what makes the race above deterministic: sleeping for a guessed duration would let the
  * test commit its competing write before the request had even taken its snapshot.
  *
- * The deadline is a few seconds rather than an open loop: a request that never blocks
- * means the race is not being exercised, and the test must say so instead of hanging.
+ * The match is the detach statement itself, whitespace-normalised, scoped to this
+ * database. A looser `from provider_identities … for update` would also match
+ * `linkIdentity`'s `select fan_id, provider … for update` running in a parallel test
+ * project, and a false positive would release the blocker too early. The deadline is a
+ * few seconds rather than an open loop: a request that never blocks means the race is not
+ * being exercised, and the test must say so instead of hanging.
  */
 async function waitForBlockedDetach(): Promise<void> {
+  const detachSelect = 'select fan_id from provider_identities where id = $1 for update'
   const deadline = Date.now() + 5_000
   while (Date.now() < deadline) {
     const { rows } = await db.pool.query<{ n: number }>(
       `select count(*)::int as n
          from pg_stat_activity
         where wait_event_type = 'Lock'
-          and query ilike '%from provider_identities%for update%'
+          and datname = current_database()
+          and regexp_replace(query, '\\s+', ' ', 'g') = $1
           and pid <> pg_backend_pid()`,
+      [detachSelect],
     )
     if ((rows[0]?.n ?? 0) > 0) return
     await new Promise((resolve) => setTimeout(resolve, 20))
