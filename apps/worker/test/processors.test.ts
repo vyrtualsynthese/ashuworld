@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Pool } from 'pg'
 import { loadGameConfigFile, type GameConfig } from '@ashuworld/gameconfig'
-import { withTransaction } from '@ashuworld/ledger'
+import { getStanding, withTransaction, type Queryable } from '@ashuworld/ledger'
 import { createTestDb, type TestDb } from '@ashuworld/ledger/testing'
 import type { DiscoveryPayload } from '@ashuworld/providers'
 import { createDiscoveryProcessor, createProcessors } from '../src/processors.js'
@@ -126,6 +126,59 @@ describe('createDiscoveryProcessor', () => {
     await expect(
       withTransaction(pool, (tx) => processor(tx, { ...payload, actions: ['twitch.nope'] })),
     ).rejects.toThrow(/twitch\.nope/)
+  })
+
+  it('pays an attached identity and recomputes the fan standing', async () => {
+    const { rows } = await pool.query<{ id: string }>(
+      `insert into fans (handle, display_name) values ('ada', 'ada') returning id`,
+    )
+    const fan = rows[0]
+    if (fan === undefined) throw new Error('expected the fan row')
+    await pool.query(
+      `insert into provider_identities
+         (provider, external_id, display_handle, fan_id, linked_at, first_linked_at)
+       values ('twitch', 't-linked', 'ada', $1, now(), now())`,
+      [fan.id],
+    )
+
+    const processor = createDiscoveryProcessor(cfg, () => new Date('2026-11-14T12:00:00Z'))
+    await withTransaction(pool, (tx) =>
+      processor(tx, { ...payload, externalId: 't-linked', displayHandle: 'ada' }),
+    )
+
+    const entries = await entriesFor('twitch', 't-linked')
+    expect(entries.map((e) => [e.action_key, e.amount])).toEqual([
+      ['twitch.follow', 50],
+      ['twitch.follow@2026-11', 5],
+    ])
+    // `awardOnce` recomputes the attached fan's standing in the same transaction, so
+    // both the live balance and the high-water mark move with the entries.
+    const standing = await getStanding(pool, fan.id)
+    expect(standing.balance).toBe(55)
+    expect(standing.peakXp).toBe(55)
+  })
+
+  it('fails loudly when the identity row vanishes before the guard', async () => {
+    const processor = createDiscoveryProcessor(cfg)
+    await expect(
+      withTransaction(pool, async (tx) => {
+        // Delete the row after `ensureIdentity` created it, so the guard's select finds
+        // nothing. Wrapping the real transaction keeps the delete inside the unit under
+        // test and lets the rollback clean it up.
+        const vanishing: Queryable = {
+          async query<R extends object = Record<string, unknown>>(
+            text: string,
+            values?: unknown[],
+          ) {
+            if (text.trim().startsWith('select fan_id, first_linked_at from provider_identities')) {
+              await tx.query('delete from provider_identities where id = $1', values)
+            }
+            return tx.query<R>(text, values)
+          },
+        }
+        await processor(vanishing, payload)
+      }),
+    ).rejects.toThrow(/identity .* vanished/)
   })
 })
 
