@@ -61,6 +61,9 @@ describe('security headers', () => {
         expect(res.headers['x-content-type-options']).toBe('nosniff')
         expect(res.headers['referrer-policy']).toBe('no-referrer')
         expect(res.headers['cross-origin-opener-policy']).toBe('same-origin')
+        expect(res.headers['strict-transport-security']).toBe(
+          'max-age=31536000; includeSubDomains',
+        )
         expect(res.headers['x-powered-by']).toBeUndefined()
       }
     })
