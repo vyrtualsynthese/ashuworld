@@ -21,6 +21,16 @@ export interface Env {
   TRUST_PROXY: boolean
   PUBLIC_BASE_URL: string
   PORT: number
+  /** Whether the rate limiter runs at all. Off in tests, on everywhere else. */
+  RATE_LIMIT_ENABLED: boolean
+  /** The length of the window every bucket counts over, in milliseconds. */
+  RATE_LIMIT_WINDOW_MS: number
+  /** Requests allowed per window on an ordinary route. */
+  RATE_LIMIT_PUBLIC_MAX: number
+  /** Requests allowed per window on a sign-in or sign-out route. */
+  RATE_LIMIT_AUTH_MAX: number
+  /** Requests allowed per window on a destructive write. */
+  RATE_LIMIT_WRITE_MAX: number
   /**
    * Pino log level. Optional so tests and callers that build a server directly keep the
    * default; the process entry point reads it from `LOG_LEVEL`, and a development stack
@@ -37,6 +47,10 @@ const DEFAULT_LOG_LEVEL: LogLevel = 'info'
 
 const DEFAULT_SESSION_COOKIE_NAME = 'ashuworld_session'
 const DEFAULT_PORT = 3000
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000
+const DEFAULT_RATE_LIMIT_PUBLIC_MAX = 120
+const DEFAULT_RATE_LIMIT_AUTH_MAX = 20
+const DEFAULT_RATE_LIMIT_WRITE_MAX = 10
 
 /** A required variable, or a plain error that names it. Empty is missing, and the value is trimmed. */
 function required(raw: NodeJS.ProcessEnv, name: string): string {
@@ -70,6 +84,21 @@ function port(raw: NodeJS.ProcessEnv): number {
   const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
     throw new Error(`PORT must be an integer between 1 and 65535, got ${JSON.stringify(value)}`)
+  }
+  return parsed
+}
+
+/**
+ * A positive whole number, or a startup error naming the variable. The rate-limit values
+ * use this: a fractional, zero or negative budget would either distort the limiter or,
+ * with zero, lock every caller out, so it must not pass silently.
+ */
+function positiveInteger(raw: NodeJS.ProcessEnv, name: string, fallback: number): number {
+  const value = raw[name]
+  if (value === undefined || value.trim() === '') return fallback
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${name} must be a positive integer, got ${JSON.stringify(value)}`)
   }
   return parsed
 }
@@ -112,6 +141,23 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
     TRUST_PROXY: flag(raw, 'TRUST_PROXY', false),
     PUBLIC_BASE_URL: publicBaseUrl,
     PORT: port(raw),
+    RATE_LIMIT_ENABLED: flag(raw, 'RATE_LIMIT_ENABLED', true),
+    RATE_LIMIT_WINDOW_MS: positiveInteger(
+      raw,
+      'RATE_LIMIT_WINDOW_MS',
+      DEFAULT_RATE_LIMIT_WINDOW_MS,
+    ),
+    RATE_LIMIT_PUBLIC_MAX: positiveInteger(
+      raw,
+      'RATE_LIMIT_PUBLIC_MAX',
+      DEFAULT_RATE_LIMIT_PUBLIC_MAX,
+    ),
+    RATE_LIMIT_AUTH_MAX: positiveInteger(raw, 'RATE_LIMIT_AUTH_MAX', DEFAULT_RATE_LIMIT_AUTH_MAX),
+    RATE_LIMIT_WRITE_MAX: positiveInteger(
+      raw,
+      'RATE_LIMIT_WRITE_MAX',
+      DEFAULT_RATE_LIMIT_WRITE_MAX,
+    ),
     LOG_LEVEL: logLevel(raw),
   }
 }

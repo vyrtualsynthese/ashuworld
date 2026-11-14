@@ -56,6 +56,11 @@ function testEnv(overrides: Partial<Env> = {}): Env {
     TRUST_PROXY: false,
     PUBLIC_BASE_URL: 'http://localhost:3000',
     PORT: 3000,
+    RATE_LIMIT_ENABLED: false,
+    RATE_LIMIT_WINDOW_MS: 60_000,
+    RATE_LIMIT_PUBLIC_MAX: 120,
+    RATE_LIMIT_AUTH_MAX: 20,
+    RATE_LIMIT_WRITE_MAX: 10,
     ...overrides,
   }
 }
