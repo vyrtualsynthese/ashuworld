@@ -5,6 +5,7 @@ import {
   clearSessionCookie,
   destroySession,
   isSessionId,
+  personalResponse,
   requireFan,
   type AuthDeps,
 } from '../auth/session.js'
@@ -95,6 +96,10 @@ export function registerMeRoutes(app: FastifyInstance, deps: AuthDeps): void {
   })
 
   app.post('/auth/logout', { config: { rateLimit: authRateLimit(deps.env) } }, async (request, reply) => {
+    // A sign-out answer is personal even without a live session: it clears this browser's
+    // cookie, and a cached copy would tell a shared proxy that someone signed out.
+    personalResponse(reply)
+
     const sessionId = request.cookies[deps.env.SESSION_COOKIE_NAME]
     if (sessionId !== undefined && isSessionId(sessionId)) {
       try {

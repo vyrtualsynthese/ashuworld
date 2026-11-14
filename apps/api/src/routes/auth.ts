@@ -21,6 +21,7 @@ import {
 import {
   authenticatedFanId,
   createSession,
+  personalResponse,
   requireFan,
   sessionFanId,
   setSessionCookie,
@@ -258,6 +259,9 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       },
     },
     async (request, reply) => {
+      // The redirect carries a handshake state that belongs to this browser alone.
+      personalResponse(reply)
+
       const provider = providers.get(request.params.provider)
       if (provider === undefined) {
         return reply.code(400).send(errorBody('unknown_provider', UNKNOWN_PROVIDER))
@@ -290,6 +294,9 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     '/auth/:provider/callback',
     { config: { rateLimit: authRateLimit(deps.env) } },
     async (request, reply) => {
+      // The callback sets the session cookie, so its answer is personal too.
+      personalResponse(reply)
+
       // Every terminal path clears the binding cookie. Doing it up front means no branch
       // below has to remember: an error, a mismatch and a success all leave the browser
       // with the cookie removed. Queuing it before the session cookie is set does not
