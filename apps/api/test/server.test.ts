@@ -152,14 +152,38 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ ...required, PUBLIC_BASE_URL: '' })).toThrow(/PUBLIC_BASE_URL/)
   })
 
-  it('fills the documented defaults', () => {
+  it('fills the documented defaults, deriving Secure from an https base URL', () => {
     expect(loadEnv(required)).toEqual({
       ...required,
       SESSION_COOKIE_NAME: 'ashuworld_session',
-      COOKIE_SECURE: false,
+      COOKIE_SECURE: true,
       ALLOW_DEV_LOGIN: false,
       PORT: 3000,
     })
+  })
+
+  it('leaves Secure off when the public base URL is plain http', () => {
+    expect(loadEnv({ ...required, PUBLIC_BASE_URL: 'http://localhost:3000' })).toMatchObject({
+      COOKIE_SECURE: false,
+    })
+  })
+
+  it('recognises https whatever its case', () => {
+    expect(loadEnv({ ...required, PUBLIC_BASE_URL: 'HTTPS://ashu.example' })).toMatchObject({
+      COOKIE_SECURE: true,
+    })
+  })
+
+  it('lets an explicit COOKIE_SECURE=false override an https base URL', () => {
+    expect(loadEnv({ ...required, COOKIE_SECURE: 'false' })).toMatchObject({
+      COOKIE_SECURE: false,
+    })
+  })
+
+  it('lets an explicit COOKIE_SECURE=true win over a plain-http base URL', () => {
+    expect(
+      loadEnv({ ...required, PUBLIC_BASE_URL: 'http://localhost:3000', COOKIE_SECURE: 'true' }),
+    ).toMatchObject({ COOKIE_SECURE: true })
   })
 
   it('reads every override as its real type', () => {

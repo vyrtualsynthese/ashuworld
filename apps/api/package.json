@@ -19,6 +19,7 @@
   "dependencies": {
     "@ashuworld/gameconfig": "workspace:*",
     "@ashuworld/ledger": "workspace:*",
+    "@ashuworld/providers": "workspace:*",
     "@fastify/cookie": "^11.1.5",
     "fastify": "^5.12.8",
     "pg": "^8.23.1"

@@ -5,6 +5,7 @@ import { ConfigError, type GameConfig } from '@ashuworld/gameconfig'
 import { AwardConflictError, HandleTakenError, PenaltyError } from '@ashuworld/ledger'
 import type { Env } from './config.js'
 import { errorBody } from './errors.js'
+import { registerAuthRoutes } from './routes/auth.js'
 import { registerHealthRoutes } from './routes/health.js'
 import { registerMeRoutes } from './routes/me.js'
 
@@ -39,12 +40,11 @@ const NOT_FOUND_MESSAGE = 'the requested resource does not exist'
  * route be exercised without a port, and it is why the pool and the game config are
  * injected rather than read from `process.env` or disk here.
  *
- * `cfg` is not used by this task's routes yet. It is part of the factory on purpose: the
- * award, penalty and standing routes that follow all need it, and threading it later
- * would mean changing every call site.
+ * `cfg` reaches the sign-in callback, which recomputes a fan's standing when a first
+ * login attaches an identity and may have prior earns to count.
  */
 export function buildServer(deps: ServerDeps): FastifyInstance {
-  const { pool, env } = deps
+  const { pool, cfg, env } = deps
   const app = Fastify({ logger: true })
 
   // Sessions arrive in the cookie `requireFan` reads, and leave in the one logout clears.
@@ -113,5 +113,6 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   registerHealthRoutes(app, pool)
   registerMeRoutes(app, { pool, env })
+  registerAuthRoutes(app, { pool, cfg, env })
   return app
 }

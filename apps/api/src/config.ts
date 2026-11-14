@@ -57,18 +57,26 @@ function port(raw: NodeJS.ProcessEnv): number {
 /**
  * Reads the environment. Takes `raw` so a test can prove the defaults without mutating
  * the process it runs in; the default argument is what `src/index.ts` uses.
+ *
+ * `COOKIE_SECURE` defaults from `PUBLIC_BASE_URL` rather than to `false`: a deployment
+ * behind TLS that forgets the variable must still get a `Secure` identity cookie. An
+ * explicit `COOKIE_SECURE=false` still wins, because local development and the test suite
+ * speak plain HTTP on purpose.
  */
 export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
+  const databaseUrl = required(raw, 'DATABASE_URL')
+  const publicBaseUrl = required(raw, 'PUBLIC_BASE_URL')
   const sessionCookieName = raw['SESSION_COOKIE_NAME']
+
   return {
-    DATABASE_URL: required(raw, 'DATABASE_URL'),
+    DATABASE_URL: databaseUrl,
     SESSION_COOKIE_NAME:
       sessionCookieName === undefined || sessionCookieName.trim() === ''
         ? DEFAULT_SESSION_COOKIE_NAME
         : sessionCookieName,
-    COOKIE_SECURE: flag(raw, 'COOKIE_SECURE', false),
+    COOKIE_SECURE: flag(raw, 'COOKIE_SECURE', publicBaseUrl.toLowerCase().startsWith('https://')),
     ALLOW_DEV_LOGIN: flag(raw, 'ALLOW_DEV_LOGIN', false),
-    PUBLIC_BASE_URL: required(raw, 'PUBLIC_BASE_URL'),
+    PUBLIC_BASE_URL: publicBaseUrl,
     PORT: port(raw),
   }
 }
