@@ -20,7 +20,7 @@
 - The product word is **Dachi**; the code and schema keep `fan` / `fans`.
 - Company facts, exact: `ASHU DEV`, `SARL`, capital `1 000 €`, `14 rue Bausset, 75015 Paris`, `RCS Paris 898 442 538`, `SIRET 898 442 538 00010`, `TVA FR 72 898 442 538`, `info@ashudev.com`, publication director `Valentin Ronteix`, hébergeur `ASHU DEV (auto-hébergement)`.
 - No new runtime dependency beyond `@fastify/helmet` and `@fastify/rate-limit`.
-- The test database is `postgres://ashu:ashu@localhost:5432/ashu`; every doc string says `5432`.
+- The host test database is `postgres://ashu:ashu@localhost:55432/ashu` (the `ashuworld-pg` container). `5432` is the dev stack's database, published by `compose.yaml`; never mix the two.
 
 ## Review Focus
 
@@ -120,8 +120,8 @@ describe('security headers', () => {
 - [ ] **Step 3: Run it and watch it fail**
 
 ```bash
-docker compose up -d db
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:5432/ashu \
+docker start ashuworld-pg   # the dedicated test database on 55432; 5432 belongs to the dev stack
+TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu \
   pnpm exec vitest run --project @ashuworld/api apps/api/test/headers.test.ts
 ```
 
@@ -165,7 +165,7 @@ app.register(helmet, helmetOptions())
 - [ ] **Step 5: Run the test and the api suite**
 
 ```bash
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:5432/ashu \
+TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu \
   pnpm exec vitest run --project @ashuworld/api
 ```
 
@@ -322,7 +322,7 @@ it('keeps the ladder readable while sign-in is limited', async () => {
 - [ ] **Step 3: Run it and watch it fail**
 
 ```bash
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:5432/ashu \
+TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu \
   pnpm exec vitest run --project @ashuworld/api apps/api/test/rate-limit.test.ts
 ```
 
@@ -411,7 +411,7 @@ On `/auth/:provider/start`, `/auth/:provider/callback` and `/auth/logout`, add `
 - [ ] **Step 7: Run the suite and commit**
 
 ```bash
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:5432/ashu pnpm exec vitest run --project @ashuworld/api
+TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu pnpm exec vitest run --project @ashuworld/api
 git add apps/api/package.json pnpm-lock.yaml apps/api/src apps/api/test/rate-limit.test.ts
 git commit -m "🔒 feat(api): rate limit sign-in and destructive writes"
 ```
@@ -464,7 +464,7 @@ In `/auth/:provider/start`, `/auth/:provider/callback` and `/auth/logout`, call 
 - [ ] **Step 4: Run the suite and commit**
 
 ```bash
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:5432/ashu pnpm exec vitest run --project @ashuworld/api
+TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu pnpm exec vitest run --project @ashuworld/api
 git add apps/api/src apps/api/test/session.test.ts
 git commit -m "🔒 fix(api): never let a shared cache keep a personal response"
 ```
@@ -507,7 +507,7 @@ omit `id`.
 - [ ] **Step 4: Run both suites and commit**
 
 ```bash
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:5432/ashu pnpm exec vitest run --project @ashuworld/api --project @ashuworld/web --project @ashuworld/ledger
+TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu pnpm exec vitest run --project @ashuworld/api --project @ashuworld/web --project @ashuworld/ledger
 git add packages/ledger/src/ladder.ts apps/web/src/api.ts apps/api/test/public.test.ts
 git commit -m "🔒 fix(public): stop publishing the account identifier"
 ```
@@ -759,7 +759,7 @@ it('records the acceptance once and never overwrites it', async () => {
 `recordTermsAcceptance` is `update fans set terms_version = $2, terms_accepted_at = now() where id = $1 and terms_accepted_at is null`. `touchLastSeen` is `update fans set last_seen_at = now() where id = $1`.
 
 ```bash
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:5432/ashu pnpm exec vitest run --project @ashuworld/ledger packages/ledger/test/consent.test.ts
+TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu pnpm exec vitest run --project @ashuworld/ledger packages/ledger/test/consent.test.ts
 ```
 
 - [ ] **Step 4: Write the failing API test**
@@ -802,7 +802,7 @@ it('records it for an existing fan whose acceptance is null at the next login', 
 - [ ] **Step 6: Run both suites and commit**
 
 ```bash
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:5432/ashu \
+TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu \
   pnpm exec vitest run --project @ashuworld/ledger --project @ashuworld/api
 git add packages/ledger apps/api
 git commit -m "⚖️ feat: record the age and terms acceptance at sign-in"
@@ -899,7 +899,7 @@ In `listLadder`, add `where f.erased_at is null` to the linked query and `and i.
 - [ ] **Step 5: Run the suite and commit**
 
 ```bash
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:5432/ashu pnpm exec vitest run --project @ashuworld/ledger
+TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu pnpm exec vitest run --project @ashuworld/ledger
 git add packages/ledger
 git commit -m "⚖️ feat(ledger): anonymising erasure that keeps the one-time keys"
 ```
@@ -972,7 +972,7 @@ Update the identity's `display_handle` to the current profile handle as part of 
 - [ ] **Step 5: Run the suites and commit**
 
 ```bash
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:5432/ashu \
+TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu \
   pnpm exec vitest run --project @ashuworld/ledger --project @ashuworld/api
 git add packages/ledger apps/api
 git commit -m "⚖️ feat(auth): an erased account can start over without a second payment"
@@ -1039,7 +1039,7 @@ Add three branches before the unknown-argument refusal, in the existing explicit
 - [ ] **Step 4: Run the suite and commit**
 
 ```bash
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:5432/ashu pnpm exec vitest run --project @ashuworld/worker
+TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu pnpm exec vitest run --project @ashuworld/worker
 git add apps/worker
 git commit -m "⚖️ feat(worker): export-fan, erase-fan, erase-identity and purge"
 ```
@@ -1132,18 +1132,18 @@ git commit -m "📝 docs(legal): register, rights runbook and compliance map"
 
 - [ ] **Step 1: Fix the facts**
 
-- Replace every `55432` with `5432` in `README.md`, `CONTRIBUTING.md`, `apps/api/test/server.test.ts` and `packages/ledger/testing/index.ts`.
+- Clarify the two ports in the README and CONTRIBUTING: `5432` is the dev stack's database, published by `compose.yaml`; `55432` is the dedicated test database (`ashuworld-pg`), which is why the test helper's error message names it. Do not change either value, and do not "fix" one to match the other.
 - Add to README: the three legal routes, the new env vars (`ERASURE_PEPPER`, the five `RATE_LIMIT_*`), the four worker commands, the purge CronJob, and an index linking the design, the plan and `docs/legal/`.
 - CONTRIBUTING: add "user-facing legal text is product copy: changing it bumps `TERMS_VERSION` and the notice's version", and two non-negotiables: acceptance recorded at sign-in, erasure anonymises and never deletes a key.
 - SECURITY.md: move rate limiting from "out of scope" to "in scope"; add the legal contact and say a failed erasure is a data-protection incident.
 
-- [ ] **Step 2: Verify no stale value remains**
+- [ ] **Step 2: Verify both ports are documented as what they are**
 
 ```bash
-grep -rn "55432" --include='*.md' --include='*.ts' . | grep -v node_modules
+grep -rn "5432\|55432" README.md CONTRIBUTING.md apps/api/test/server.test.ts packages/ledger/testing/index.ts
 ```
 
-Expected: no output.
+Expected: `5432` appears only for the dev-stack database, `55432` only for the test database.
 
 - [ ] **Step 3: Commit**
 
@@ -1210,7 +1210,7 @@ Use `${MAX_EVENT_ATTEMPTS}` in the claim SQL, in the log line, and in the commen
 - [ ] **Step 2: Run the worker suite and commit**
 
 ```bash
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:5432/ashu pnpm exec vitest run --project @ashuworld/worker
+TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu pnpm exec vitest run --project @ashuworld/worker
 git add apps/worker
 git commit -m "♻️ refactor(worker): name the retry bound once"
 ```
@@ -1265,7 +1265,7 @@ Do not add a pool-level `statement_timeout`: it would apply to the long `purge` 
 - [ ] **Step 3: Run and commit**
 
 ```bash
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:5432/ashu pnpm exec vitest run --project @ashuworld/ledger
+TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu pnpm exec vitest run --project @ashuworld/ledger
 git add packages/ledger
 git commit -m "♻️ refactor(ledger): bound pool waits with named constants"
 ```
