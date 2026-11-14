@@ -56,19 +56,56 @@ describe('schema', () => {
       `select table_name from information_schema.tables where table_schema = current_schema() order by 1`,
     )
     expect(rows.map((r) => r.table_name)).toEqual(
-      expect.arrayContaining(['fans', 'provider_identities', 'xp_entries', 'inbound_events', 'sessions', 'audit_log']),
+      expect.arrayContaining([
+        'fans',
+        'provider_identities',
+        'xp_entries',
+        'inbound_events',
+        'sessions',
+        'audit_log',
+        'oauth_handshakes',
+      ]),
     )
   })
 
   it('is idempotent', async () => {
     await expect(migrate(db.pool)).resolves.toBeUndefined()
     const { rows } = await db.pool.query<{ n: string }>('select count(*)::text as n from _migrations')
-    expect(rows[0]?.n).toBe('1')
+    expect(rows[0]?.n).toBe('2')
   })
 
-  it('records the applied file by name', async () => {
+  it('records the applied files by name', async () => {
     const { rows } = await db.pool.query<{ name: string }>('select name from _migrations order by 1')
-    expect(rows.map((r) => r.name)).toEqual(['0001_init.sql'])
+    expect(rows.map((r) => r.name)).toEqual(['0001_init.sql', '0002_oauth_handshakes.sql'])
+  })
+
+  it('refuses a handshake purpose that is neither login nor link', async () => {
+    await expect(
+      db.pool.query(
+        `insert into oauth_handshakes (state, provider, purpose, expires_at)
+         values ('state-1', 'dev', 'admin', now() + interval '10 minutes')`,
+      ),
+    ).rejects.toThrow(/oauth_handshakes_purpose_check/)
+  })
+
+  it('refuses a link handshake that names no fan', async () => {
+    await expect(
+      db.pool.query(
+        `insert into oauth_handshakes (state, provider, purpose, expires_at)
+         values ('state-1', 'dev', 'link', now() + interval '10 minutes')`,
+      ),
+    ).rejects.toThrow(/link_handshake_has_fan/)
+  })
+
+  it('accepts a link handshake once it names a fan', async () => {
+    const fanId = await seedFan(db)
+    await db.pool.query(
+      `insert into oauth_handshakes (state, provider, purpose, fan_id, expires_at)
+       values ('state-1', 'dev', 'link', $1, now() + interval '10 minutes')`,
+      [fanId],
+    )
+    const { rows } = await db.pool.query<{ n: string }>('select count(*)::text as n from oauth_handshakes')
+    expect(rows[0]?.n).toBe('1')
   })
 
   it('refuses an entry owned by both an identity and a fan', async () => {
@@ -161,7 +198,7 @@ describe('migration runner', () => {
       // re-check inside the lock makes it skip instead of replaying the file.
       await Promise.all([migrate(fresh.pool), migrate(fresh.pool)])
       const { rows } = await fresh.pool.query<{ n: string }>('select count(*)::text as n from _migrations')
-      expect(rows[0]?.n).toBe('1')
+      expect(rows[0]?.n).toBe('2')
       const { rows: fans } = await fresh.pool.query<{ n: string }>("select count(*)::text as n from pg_tables where schemaname = current_schema() and tablename = 'fans'")
       expect(fans[0]?.n).toBe('1')
     } finally {
@@ -179,10 +216,10 @@ describe('migration runner', () => {
     const fresh = await createTestDb({ migrate: false })
     try {
       process.chdir(elsewhere)
-      expect(migrationFiles()).toEqual(['0001_init.sql'])
+      expect(migrationFiles()).toEqual(['0001_init.sql', '0002_oauth_handshakes.sql'])
       await migrate(fresh.pool)
       const { rows } = await fresh.pool.query<{ name: string }>('select name from _migrations order by 1')
-      expect(rows.map((r) => r.name)).toEqual(['0001_init.sql'])
+      expect(rows.map((r) => r.name)).toEqual(['0001_init.sql', '0002_oauth_handshakes.sql'])
       const { rows: tables } = await fresh.pool.query<{ tablename: string }>(
         `select tablename from pg_tables where schemaname = current_schema() order by 1`,
       )

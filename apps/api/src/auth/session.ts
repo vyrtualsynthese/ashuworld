@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import type { FastifyReply, FastifyRequest, preHandlerHookHandler } from 'fastify'
+import type { FastifyReply, FastifyRequest, preHandlerAsyncHookHandler } from 'fastify'
 import type { Pool } from 'pg'
 import { withTransaction, type Queryable } from '@ashuworld/ledger'
 import type { Env } from '../config.js'
@@ -112,6 +112,35 @@ export async function readSession(
   return row === undefined ? null : { fanId: row.fan_id }
 }
 
+/**
+ * The session id the request presents, when it is shaped like one this service could
+ * have issued. Answers null for a missing cookie and for anything that is not a session
+ * id, so a caller can reject a malformed value before opening a transaction.
+ */
+export function presentedSessionId(request: FastifyRequest, env: SessionConfig): string | null {
+  const id = request.cookies[env.SESSION_COOKIE_NAME]
+  if (id === undefined || id === '') return null
+  return isSessionId(id) ? id : null
+}
+
+/**
+ * The fan behind the request's session cookie, or null when there is no live session.
+ *
+ * `requireFan` and the OAuth callback both need this answer. They reach it differently —
+ * the hook answers 401 and the callback decides by handshake purpose — but they agree on
+ * what counts as signed in because both go through `readSession` and its expiry check.
+ */
+export async function sessionFanId(
+  tx: Queryable,
+  request: FastifyRequest,
+  env: SessionConfig,
+): Promise<string | null> {
+  const id = presentedSessionId(request, env)
+  if (id === null) return null
+  const session = await readSession(tx, id)
+  return session?.fanId ?? null
+}
+
 /** Removes the session. Deleting an id that is not there is a no-op, not an error. */
 export async function destroySession(tx: Queryable, id: string): Promise<void> {
   await tx.query('delete from sessions where id = $1', [id])
@@ -166,17 +195,13 @@ declare module 'fastify' {
  * A store that cannot answer is a 503 rather than a 401 — signing every fan out because
  * Postgres hiccuped would be a lie, and a 500 would not say what is broken.
  */
-export function requireFan(deps: AuthDeps): preHandlerHookHandler {
+export function requireFan(deps: AuthDeps): preHandlerAsyncHookHandler {
   return async (request, reply) => {
-    const sessionId = request.cookies[deps.env.SESSION_COOKIE_NAME]
-    if (sessionId === undefined || sessionId === '') {
-      return reply.code(401).send(errorBody('unauthenticated', UNAUTHENTICATED_MESSAGE))
-    }
-
-    // Checked here, before the transaction, so a malformed cookie answers 401 without
-    // taking a connection. `readSession` repeats it for callers that do not come through
-    // this hook.
-    if (!isSessionId(sessionId)) {
+    // The shape is checked here, before the transaction, so a malformed cookie answers 401
+    // without taking a connection. `readSession` repeats it for callers that do not come
+    // through this hook.
+    const sessionId = presentedSessionId(request, deps.env)
+    if (sessionId === null) {
       return reply.code(401).send(errorBody('unauthenticated', UNAUTHENTICATED_MESSAGE))
     }
 
