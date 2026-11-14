@@ -19,28 +19,85 @@ import {
 const IDENTITY_ID = ME.identities[0]!.id
 
 describe('Ladder', () => {
-  it('renders ladder rows from the api and splits linked from free-standing', async () => {
+  it('renders one ranked table, with Dachis and unattached accounts side by side', async () => {
     stubFetch(() => jsonResponse(LADDER))
 
     renderPage(<Ladder />, '/ladder')
 
-    expect(await screen.findByRole('link', { name: 'ashu' })).toHaveAttribute(
+    // One table, not a section per kind of account: the reader compares totals, so the two
+    // api lists are merged before they are shown.
+    const table = await screen.findByRole('table', { name: /classement par xp/i })
+    const rows = within(table).getAllByRole('row')
+    expect(rows).toHaveLength(4)
+
+    expect(within(rows[0]!).getByRole('columnheader', { name: 'Rang' })).toBeInTheDocument()
+    expect(within(rows[0]!).getByRole('columnheader', { name: 'Dachi' })).toBeInTheDocument()
+    expect(within(rows[0]!).getByRole('columnheader', { name: 'Niveau' })).toBeInTheDocument()
+    expect(within(rows[0]!).getByRole('columnheader', { name: 'XP' })).toBeInTheDocument()
+
+    // 320, then the free-standing 45, then the negative balance. A Dachi links to a
+    // profile; an account with no Dachi has neither a link nor a level.
+    expect(within(rows[1]!).getByRole('link', { name: 'ashu' })).toHaveAttribute(
       'href',
       '/f/ashu',
     )
-    expect(screen.getByText('320')).toBeInTheDocument()
-    expect(screen.getByText('-40')).toBeInTheDocument()
-    expect(screen.getByText('Level 2')).toBeInTheDocument()
+    expect(within(rows[1]!).getByText('Niveau 2')).toBeInTheDocument()
+    expect(within(rows[1]!).getByText('320')).toBeInTheDocument()
 
-    const free = screen.getByRole('region', { name: /free-standing accounts/i })
-    expect(within(free).getByText('@sofa_sam')).toBeInTheDocument()
-    expect(within(free).getByText('45')).toBeInTheDocument()
+    expect(within(rows[2]!).getByText('@sofa_sam')).toBeInTheDocument()
+    expect(within(rows[2]!).getByText('Twitch')).toBeInTheDocument()
+    expect(within(rows[2]!).getByText('45')).toBeInTheDocument()
+    expect(within(rows[2]!).queryByRole('link')).not.toBeInTheDocument()
+    expect(within(rows[2]!).queryByText(/niveau/i)).not.toBeInTheDocument()
+
+    expect(within(rows[3]!).getByRole('link', { name: 'dave' })).toBeInTheDocument()
+    expect(within(rows[3]!).getByText('-40')).toBeInTheDocument()
   })
 
-  it('ranks the linked rows by spendable XP, not by a level that only moves forward', async () => {
-    // `carol` has the highest level and the smallest balance: the ordering a page gets
-    // from the server is by balance, and anything that re-sorts by the sticky record
-    // (the level, which comes from peak XP) puts her first instead of last.
+  it('puts a Dachi and a free-standing account in one table in XP order', async () => {
+    stubFetch(() =>
+      jsonResponse({
+        linked: [{ fanId: 'fan-1', handle: 'ashu', level: 1, balance: 100 }],
+        freeStanding: [
+          { identityId: 'identity-1', provider: 'twitch', displayHandle: 'sofa_sam', xp: 250 },
+        ],
+      }),
+    )
+
+    renderPage(<Ladder />, '/ladder')
+
+    const rows = (await screen.findAllByRole('row')).slice(1)
+    // The free-standing account is ahead, so it is rank 1 in the same table. Asserting the
+    // ordered content rather than the rank cells keeps this about ranking, not a column.
+    expect(rows.map((row) => row.textContent)).toEqual([
+      '1Twitch @sofa_sam250',
+      '2ashuNiveau 1100',
+    ])
+    expect(within(rows[0]!).queryByRole('link')).not.toBeInTheDocument()
+    expect(within(rows[1]!).getByRole('link', { name: 'ashu' })).toBeInTheDocument()
+  })
+
+  it('breaks an XP tie by name, using French collation', async () => {
+    stubFetch(() =>
+      jsonResponse({
+        linked: [
+          { fanId: 'fan-1', handle: 'zoe', level: 1, balance: 50 },
+          // Under a code-unit sort `zoe` comes before `émile`; the page must compare names.
+          { fanId: 'fan-2', handle: 'émile', level: 1, balance: 50 },
+        ],
+        freeStanding: [],
+      }),
+    )
+
+    renderPage(<Ladder />, '/ladder')
+
+    const rows = (await screen.findAllByRole('row')).slice(1)
+    expect(rows.map((row) => row.querySelector('a')?.textContent)).toEqual(['émile', 'zoe'])
+  })
+
+  it('ranks by XP, not by a level that only moves forward', async () => {
+    // `carol` has the highest level and the smallest XP: the ordering a page gets from the
+    // sticky record (the level, which comes from peak XP) puts her first instead of last.
     stubFetch(() =>
       jsonResponse({
         linked: [
@@ -55,21 +112,21 @@ describe('Ladder', () => {
     renderPage(<Ladder />, '/ladder')
 
     const rows = await screen.findAllByRole('row')
-    // Header row first, then the fans in the server's order. Asserting the ordered handles
-    // rather than the rank cells keeps the check about ranking, not about a table column.
+    // Header row first, then the rows in XP order. Asserting the ordered handles rather
+    // than the rank cells keeps the check about ranking, not about a table column.
     const handles = rows.slice(1).map((row) => row.querySelector('a')?.textContent)
     expect(handles).toEqual(['ashu', 'bo', 'carol'])
     expect(within(rows[3]!).getByText('10')).toBeInTheDocument()
-    expect(within(rows[3]!).getByText('Level 4')).toBeInTheDocument()
+    expect(within(rows[3]!).getByText('Niveau 4')).toBeInTheDocument()
   })
 
-  it('explains an empty ladder in plain words instead of showing a blank table', async () => {
+  it('explains an empty ladder in one sentence instead of showing a blank table', async () => {
     stubFetch(() => jsonResponse({ linked: [], freeStanding: [] }))
 
     renderPage(<Ladder />, '/ladder')
 
     expect(
-      await screen.findByText(/nobody has joined the ladder yet/i),
+      await screen.findByText(/personne n’a encore gagné d’xp/i),
     ).toBeInTheDocument()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
   })
@@ -89,36 +146,40 @@ describe('Ladder', () => {
 
     renderPage(<Ladder />, '/ladder')
 
-    expect(await screen.findByText(/the ladder could not be loaded/i)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/le classement n’a pas pu être chargé/i),
+    ).toBeInTheDocument()
     expect(screen.queryByText(/the database did not answer/i)).not.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: /try again/i }))
+    await userEvent.click(screen.getByRole('button', { name: /réessayer/i }))
     expect(await screen.findByRole('link', { name: 'ashu' })).toBeInTheDocument()
   })
 })
 
 describe('Profile', () => {
-  it('shows the level badge, the handle, the balance, the peak and the providers', async () => {
+  it('shows the level badge, the handle, the XP, the peak and the providers', async () => {
     stubFetch(() => jsonResponse(FAN))
 
     renderPageAt('/f/ashu', '/f/:handle', <Profile />)
 
     expect(await screen.findByRole('heading', { name: 'Ashu' })).toBeInTheDocument()
     expect(screen.getByText('ashu')).toBeInTheDocument()
-    expect(screen.getByText('Level 2')).toBeInTheDocument()
+    expect(screen.getByText('Niveau 2')).toBeInTheDocument()
+    expect(screen.getByText('XP')).toBeInTheDocument()
+    expect(screen.getByText('XP maximal')).toBeInTheDocument()
     expect(screen.getByText('320')).toBeInTheDocument()
     expect(screen.getByText('540')).toBeInTheDocument()
     expect(screen.getByText('@ashu_tv')).toBeInTheDocument()
     expect(screen.getByText('@ashu_dc')).toBeInTheDocument()
   })
 
-  it('explains that peak xp is the highest balance ever reached', async () => {
+  it('explains that peak XP is the highest total ever reached', async () => {
     stubFetch(() => jsonResponse(FAN))
 
     renderPageAt('/f/ashu', '/f/:handle', <Profile />)
 
     expect(
-      await screen.findByText(/peak xp is the highest balance .* ever reached/i),
+      await screen.findByText(/le plus haut total jamais atteint/i),
     ).toBeInTheDocument()
   })
 
@@ -144,15 +205,17 @@ describe('Profile', () => {
 
     renderPageAt('/f/nobody', '/f/:handle', <Profile />)
 
-    expect(await screen.findByRole('heading', { name: /no such fan/i })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: /aucun dachi à ce nom/i }),
+    ).toBeInTheDocument()
     expect(screen.getByText(/nobody/)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /back to the ladder/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /retour au classement/i })).toHaveAttribute(
       'href',
       '/ladder',
     )
   })
 
-  it('treats a 4xx other than 404 as no such fan, not a server failure', async () => {
+  it('treats a 4xx other than 404 as no such Dachi, not a server failure', async () => {
     stubFetch(() =>
       jsonResponse(
         { error: { code: 'forbidden', message: 'this profile is not visible' } },
@@ -162,8 +225,10 @@ describe('Profile', () => {
 
     renderPageAt('/f/ashu', '/f/:handle', <Profile />)
 
-    expect(await screen.findByRole('heading', { name: /no such fan/i })).toBeInTheDocument()
-    expect(screen.queryByText(/this profile could not be loaded/i)).not.toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: /aucun dachi à ce nom/i }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/ce profil n’a pas pu être chargé/i)).not.toBeInTheDocument()
   })
 
   it('does not print the server error text when the profile fails to load', async () => {
@@ -171,7 +236,9 @@ describe('Profile', () => {
 
     renderPageAt('/f/ashu', '/f/:handle', <Profile />)
 
-    expect(await screen.findByText(/this profile could not be loaded/i)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/ce profil n’a pas pu être chargé/i),
+    ).toBeInTheDocument()
     expect(screen.queryByText(/upstream said no/i)).not.toBeInTheDocument()
   })
 
@@ -182,8 +249,12 @@ describe('Profile', () => {
 
     renderPageAt('/f/ashu', '/f/:handle', <Profile />)
 
-    expect(await screen.findByText(/this profile could not be loaded/i)).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: /no such fan/i })).not.toBeInTheDocument()
+    expect(
+      await screen.findByText(/ce profil n’a pas pu être chargé/i),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: /aucun dachi à ce nom/i }),
+    ).not.toBeInTheDocument()
   })
 })
 
@@ -196,9 +267,11 @@ describe('Account, signed out', () => {
 
     renderPage(<Account />, '/account')
 
-    expect(await screen.findByRole('heading', { name: /sign in/i })).toBeInTheDocument()
     expect(
-      screen.getByRole('link', { name: /sign in with the dev account/i }),
+      await screen.findByRole('heading', { name: /se connecter à ashuworld/i }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: /se connecter avec le compte de développement/i }),
     ).toHaveAttribute('href', '/auth/dev/start?purpose=login')
     expect(screen.queryByText(/sign in to continue/i)).not.toBeInTheDocument()
   })
@@ -212,12 +285,12 @@ describe('Account, signed out', () => {
     renderPage(<Account />, '/account')
 
     expect(
-      await screen.findByText(/sign-in is not switched on for this deployment/i),
+      await screen.findByText(/la connexion n’est pas activée sur ce déploiement/i),
     ).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /dev account/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /compte de développement/i })).not.toBeInTheDocument()
   })
 
-  it('warns a signed-out fan from a detach and names the way back', async () => {
+  it('warns a signed-out Dachi from a detach and names the way back', async () => {
     vi.stubEnv('VITE_DEV_LOGIN', 'true')
     stubFetch(() =>
       jsonResponse({ error: { code: 'unauthenticated', message: 'sign in to continue' } }, 401),
@@ -225,22 +298,24 @@ describe('Account, signed out', () => {
 
     renderPage(<Account />, '/account?reattach=twitch')
 
-    const notice = await screen.findByRole('region', { name: /twitch account is detached/i })
-    expect(within(notice).getByText(/forfeited for good/i)).toBeInTheDocument()
-    expect(within(notice).getByText(/forfeit cannot be undone/i)).toBeInTheDocument()
+    const notice = await screen.findByRole('region', { name: /ton compte twitch est détaché/i })
+    expect(within(notice).getByText(/perdue pour toujours/i)).toBeInTheDocument()
+    expect(within(notice).getByText(/la perte est définitive/i)).toBeInTheDocument()
     // The way back starts from an account that still works, then a fresh attach.
     expect(
-      within(notice).getByText(/sign in with an account that is still attached/i),
+      within(notice).getByText(/un compte encore rattaché/i),
     ).toBeInTheDocument()
-    expect(within(notice).getByText(/start a fresh twitch sign-in/i)).toBeInTheDocument()
+    expect(
+      within(notice).getByText(/nouvelle connexion twitch/i),
+    ).toBeInTheDocument()
     // Signing in with the detached provider loops back here, so the notice must not
     // promise that it reattaches anything.
     expect(
-      within(notice).queryByText(/signing in with twitch again attaches it/i),
+      within(notice).queryByText(/se reconnecter avec twitch le rattache/i),
     ).not.toBeInTheDocument()
 
     // The news comes before the button that acts on it: the panel must precede sign-in.
-    const signIn = screen.getByRole('region', { name: /sign in to ashuworld/i })
+    const signIn = screen.getByRole('region', { name: /se connecter à ashuworld/i })
     expect(
       notice.compareDocumentPosition(signIn) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
@@ -254,9 +329,11 @@ describe('Account, signed out', () => {
 
     renderPage(<Account />, '/account?reattach=%3Cb%3Eevil')
 
-    expect(await screen.findByRole('heading', { name: /sign in/i })).toBeInTheDocument()
     expect(
-      screen.queryByRole('region', { name: /account is detached/i }),
+      await screen.findByRole('heading', { name: /se connecter à ashuworld/i }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('region', { name: /compte .* est détaché/i }),
     ).not.toBeInTheDocument()
   })
 
@@ -270,10 +347,12 @@ describe('Account, signed out', () => {
 
     renderPage(<Account />, '/account')
 
-    expect(await screen.findByText(/your account could not be loaded/i)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/ton compte n’a pas pu être chargé/i),
+    ).toBeInTheDocument()
     expect(screen.queryByText(/gateway timeout/i)).not.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: /try again/i }))
+    await userEvent.click(screen.getByRole('button', { name: /réessayer/i }))
     expect(await screen.findByRole('heading', { name: 'Ashu' })).toBeInTheDocument()
   })
 })
@@ -283,18 +362,20 @@ describe('Account, signed in', () => {
     return stubFetch(handler)
   }
 
-  it('shows the fan, the standing and one detach button per identity', async () => {
+  it('shows the Dachi, the standing and one detach button per identity', async () => {
     signedIn()
 
     renderPage(<Account />, '/account')
 
     expect(await screen.findByRole('heading', { name: 'Ashu' })).toBeInTheDocument()
-    expect(screen.getByText('Level 2')).toBeInTheDocument()
+    expect(screen.getByText('Niveau 2')).toBeInTheDocument()
+    expect(screen.getByText('XP')).toBeInTheDocument()
+    expect(screen.getByText('XP maximal')).toBeInTheDocument()
     expect(screen.getByText('320')).toBeInTheDocument()
     expect(screen.getByText('540')).toBeInTheDocument()
     expect(screen.getByText('@ashu_tv')).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: /detach twitch account ashu_tv/i }),
+      screen.getByRole('button', { name: /détacher le compte twitch ashu_tv/i }),
     ).toBeInTheDocument()
   })
 
@@ -304,31 +385,33 @@ describe('Account, signed in', () => {
     renderPage(<Account />, '/account')
 
     expect(
-      await screen.findByRole('link', { name: /attach youtube account/i }),
+      await screen.findByRole('link', { name: /rattacher un compte youtube/i }),
     ).toHaveAttribute('href', '/auth/youtube/start?purpose=link')
     expect(
-      screen.queryByRole('link', { name: /attach twitch account/i }),
+      screen.queryByRole('link', { name: /rattacher un compte twitch/i }),
     ).not.toBeInTheDocument()
   })
 
-  it('states plainly that detaching forfeits the xp for good and that the level stays', async () => {
+  it('states plainly that detaching forfeits the XP for good and that the level stays', async () => {
     const fetchMock = signedIn()
     const user = userEvent.setup()
 
     renderPage(<Account />, '/account')
     await user.click(
-      await screen.findByRole('button', { name: /detach twitch account ashu_tv/i }),
+      await screen.findByRole('button', { name: /détacher le compte twitch ashu_tv/i }),
     )
 
-    const panel = screen.getByRole('region', { name: /detach your twitch account/i })
-    expect(within(panel).getByText(/for good/i)).toBeInTheDocument()
-    expect(within(panel).getByText(/your level and your peak xp stay/i)).toBeInTheDocument()
+    const panel = screen.getByRole('region', { name: /détacher ton compte twitch/i })
+    expect(within(panel).getByText(/perdue pour toujours/i)).toBeInTheDocument()
+    expect(
+      within(panel).getByText(/ton niveau et ton xp maximal restent inchangés/i),
+    ).toBeInTheDocument()
     // Only the initial profile read has happened: nothing was sent yet.
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    await user.click(within(panel).getByRole('button', { name: /keep it attached/i }))
+    await user.click(within(panel).getByRole('button', { name: /le garder rattaché/i }))
     expect(
-      screen.queryByRole('region', { name: /detach your twitch account/i }),
+      screen.queryByRole('region', { name: /détacher ton compte twitch/i }),
     ).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
@@ -339,12 +422,12 @@ describe('Account, signed in', () => {
 
     renderPage(<Account />, '/account')
     await user.click(
-      await screen.findByRole('button', { name: /detach twitch account ashu_tv/i }),
+      await screen.findByRole('button', { name: /détacher le compte twitch ashu_tv/i }),
     )
 
-    const panel = screen.getByRole('region', { name: /detach your twitch account/i })
+    const panel = screen.getByRole('region', { name: /détacher ton compte twitch/i })
     expect(
-      within(panel).getByText(/attaching this account again later will not bring the xp back/i),
+      within(panel).getByText(/rattacher ce compte plus tard ne la rapportera pas/i),
     ).toBeInTheDocument()
   })
 
@@ -367,20 +450,20 @@ describe('Account, signed in', () => {
 
     renderPage(<Account />, '/account')
     await user.click(
-      await screen.findByRole('button', { name: /detach twitch account ashu_tv/i }),
+      await screen.findByRole('button', { name: /détacher le compte twitch ashu_tv/i }),
     )
-    await user.click(screen.getByRole('button', { name: /yes, detach it/i }))
+    await user.click(screen.getByRole('button', { name: /oui, détacher/i }))
 
     const notice = await screen.findByRole('status')
-    expect(notice).toHaveTextContent(/3 xp entries were forfeited/i)
-    expect(notice).toHaveTextContent(/your level is still 2/i)
-    expect(notice).toHaveTextContent(/attach it again later as a fresh, empty account/i)
-    expect(notice).toHaveTextContent(/the forfeit is permanent/i)
+    expect(notice).toHaveTextContent(/3 entrées d’xp ont été perdues/i)
+    expect(notice).toHaveTextContent(/ton niveau est toujours 2/i)
+    expect(notice).toHaveTextContent(/un compte neuf et vide/i)
+    expect(notice).toHaveTextContent(/la perte est définitive/i)
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/me/identities/${IDENTITY_ID}/detach`,
       expect.objectContaining({ method: 'POST' }),
     )
-    // The profile is read again, so the balance shown is the one after the detach.
+    // The profile is read again, so the XP shown is the one after the detach.
     expect(await screen.findByText('120')).toBeInTheDocument()
   })
 
@@ -403,12 +486,12 @@ describe('Account, signed in', () => {
 
     renderPage(<Account />, '/account')
     await user.click(
-      await screen.findByRole('button', { name: /detach twitch account ashu_tv/i }),
+      await screen.findByRole('button', { name: /détacher le compte twitch ashu_tv/i }),
     )
-    await user.click(screen.getByRole('button', { name: /yes, detach it/i }))
+    await user.click(screen.getByRole('button', { name: /oui, détacher/i }))
 
     const refusal = await screen.findByRole('alert')
-    expect(refusal).toHaveTextContent(/the only way into your account/i)
+    expect(refusal).toHaveTextContent(/ta seule porte d’entrée/i)
     expect(refusal).not.toHaveTextContent(/must keep at least one identity/i)
   })
 
@@ -417,18 +500,18 @@ describe('Account, signed in', () => {
 
     renderPage(<Account />, '/account?reattach=youtube')
 
-    const notice = await screen.findByRole('region', { name: /youtube account is detached/i })
-    expect(within(notice).getByText(/fresh, empty account/i)).toBeInTheDocument()
-    expect(within(notice).getByText(/the forfeit is permanent/i)).toBeInTheDocument()
+    const notice = await screen.findByRole('region', { name: /ton compte youtube est détaché/i })
+    expect(within(notice).getByText(/un compte neuf et vide/i)).toBeInTheDocument()
+    expect(within(notice).getByText(/la perte est définitive/i)).toBeInTheDocument()
     expect(
-      within(notice).getByRole('link', { name: /attach youtube again/i }),
+      within(notice).getByRole('link', { name: /rattacher youtube/i }),
     ).toHaveAttribute('href', '/auth/youtube/start?purpose=link')
     expect(
       screen.getByRole('heading', { name: 'Ashu' }),
     ).toBeInTheDocument()
     // Signed in, the shorter re-attach panel is the whole story; the signed-out notice
     // would say the same thing twice.
-    expect(screen.queryByText(/forfeited for good/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/perdue pour toujours/i)).not.toBeInTheDocument()
   })
 
   it('does not claim a provider is detached when that provider is still attached', async () => {
@@ -438,7 +521,7 @@ describe('Account, signed in', () => {
 
     await screen.findByRole('heading', { name: 'Ashu' })
     expect(
-      screen.queryByRole('region', { name: /twitch account is detached/i }),
+      screen.queryByRole('region', { name: /ton compte twitch est détaché/i }),
     ).not.toBeInTheDocument()
   })
 
@@ -449,7 +532,7 @@ describe('Account, signed in', () => {
 
     await screen.findByRole('heading', { name: 'Ashu' })
     expect(
-      screen.queryByRole('region', { name: /account is detached/i }),
+      screen.queryByRole('region', { name: /compte .* est détaché/i }),
     ).not.toBeInTheDocument()
   })
 
@@ -469,9 +552,11 @@ describe('Account, signed in', () => {
     const user = userEvent.setup()
 
     renderPage(<Account />, '/account')
-    await user.click(await screen.findByRole('button', { name: /sign out/i }))
+    await user.click(await screen.findByRole('button', { name: /se déconnecter/i }))
 
-    expect(await screen.findByRole('heading', { name: /sign in/i })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: /se connecter à ashuworld/i }),
+    ).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith(
       '/auth/logout',
       expect.objectContaining({ method: 'POST', credentials: 'same-origin' }),
