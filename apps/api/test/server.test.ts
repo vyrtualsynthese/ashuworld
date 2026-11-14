@@ -451,6 +451,75 @@ describe('error shape', () => {
       expect(logged).toHaveBeenCalled()
     })
   })
+
+  it('logs the 404 path without the query string', async () => {
+    // A callback URL typed at the wrong path still carries the provider's `code` and the
+    // handshake `state`, and both are credentials. The response already refuses to echo
+    // the URL; the log line must not keep it either.
+    const lines: string[] = []
+    const app = buildServer({
+      pool,
+      cfg,
+      env: testEnv(),
+      logStream: { write: (line) => lines.push(line) },
+    })
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/auth/dev/callbak?code=live-code&state=live-state',
+      })
+      expect(res.statusCode).toBe(404)
+
+      const requestLines = lines
+        .map((line) => JSON.parse(line) as { req?: { method: string; url: string } })
+        .filter((entry) => entry.req !== undefined)
+      expect(requestLines.length).toBeGreaterThan(0)
+      for (const entry of requestLines) {
+        expect(entry.req?.url).toBe('/auth/dev/callbak')
+        expect(entry.req?.url).not.toContain('?')
+      }
+      expect(lines.join('\n')).not.toContain('live-code')
+      expect(lines.join('\n')).not.toContain('live-state')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('keeps the client address and port on the request log line', async () => {
+    // `inject` fakes a socket without a source port, so this one request goes over a
+    // real loopback connection: the fields are only meaningful if a real socket fills
+    // them in.
+    const lines: string[] = []
+    const app = buildServer({
+      pool,
+      cfg,
+      env: testEnv(),
+      logStream: { write: (line) => lines.push(line) },
+    })
+    try {
+      const base = await app.listen({ port: 0, host: '127.0.0.1' })
+      const res = await fetch(`${base}/api/health`)
+      expect(res.status).toBe(200)
+
+      const requestLines = lines
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              req?: { method: string; url: string; remoteAddress?: string; remotePort?: number }
+            },
+        )
+        .filter((entry) => entry.req?.url === '/api/health')
+      expect(requestLines.length).toBeGreaterThan(0)
+      const request = requestLines[0]?.req
+      expect(request?.method).toBe('GET')
+      expect(typeof request?.remoteAddress).toBe('string')
+      expect(request?.remoteAddress).toBe('127.0.0.1')
+      expect(typeof request?.remotePort).toBe('number')
+      expect(request?.remotePort).toBeGreaterThan(0)
+    } finally {
+      await app.close()
+    }
+  })
 })
 
 describe('plugins', () => {
