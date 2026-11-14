@@ -139,6 +139,19 @@ alphaReset:
     limits:
       memory: 256Mi
 
+levelRecompute:
+  # One-shot Job for a level-table change in game.json. Its command is
+  # `node dist/worker.js recompute-levels`: it re-reads every fan's peak XP through the
+  # current table and raises the levels that now qualify, never lowering one. Like the
+  # alpha reset, it is a plain Job an operator turns on, runs, and deletes.
+  enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
 # The web bundle compiles VITE_DEV_LOGIN at build time (Vite replaces import.meta.env), so
 # it is not a chart value: flipping it means rebuilding and republishing the web image with
 # `--build-arg VITE_DEV_LOGIN=true`. The api's ALLOW_DEV_LOGIN is the matching switch above.

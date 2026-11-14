@@ -103,6 +103,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@ashuworld/gameconfig':
+        specifier: workspace:*
+        version: link:../../packages/gameconfig
       '@ashuworld/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger

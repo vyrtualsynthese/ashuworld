@@ -3,9 +3,9 @@
 # Renders the chart and asserts the promises the deployment makes.
 #
 # Every check here failed at least once during the chart's first draft, or is a rule the
-# brief calls out by name. The script renders the chart three times: the default values,
-# with the hook receiver turned on, and with the alpha reset turned on, because the two
-# gated resources must stay out of a default install.
+# brief calls out by name. The script renders the chart four times: the default values,
+# with the hook receiver turned on, with the alpha reset turned on, and with the level
+# recompute turned on, because the gated resources must stay out of a default install.
 #
 # Run from anywhere: the chart directory is resolved from this file's own path.
 set -euo pipefail
@@ -26,6 +26,7 @@ render() {
 default_out="$(render)"
 hooks_out="$(render --set hooks.enabled=true)"
 reset_out="$(render --set alphaReset.enabled=true)"
+level_out="$(render --set levelRecompute.enabled=true)"
 
 # --- shape ---------------------------------------------------------------------------
 
@@ -60,6 +61,13 @@ grep -q 'kind: Job' <<<"$default_out" || fail "no migrate Job"
 
 grep -q 'alpha-reset' <<<"$default_out" && fail "alpha reset job rendered without alphaReset.enabled"
 grep -q 'alpha-reset' <<<"$reset_out" || fail "alpha reset job missing when alphaReset.enabled=true"
+
+# --- the level recompute is gated ----------------------------------------------------
+
+grep -q 'level-recompute' <<<"$default_out" &&
+  fail "level recompute job rendered without levelRecompute.enabled"
+grep -q 'level-recompute' <<<"$level_out" ||
+  fail "level recompute job missing when levelRecompute.enabled=true"
 
 # --- secrets stay in Secrets ---------------------------------------------------------
 

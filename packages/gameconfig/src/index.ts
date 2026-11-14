@@ -5,6 +5,13 @@ import { ConfigError, isRecord } from './validate.js'
 export { ConfigError } from './validate.js'
 export { actionAmount, type ActionDef, type ActionKey } from './actions.js'
 export { levelForXp, type LevelPosition, type LevelRow } from './levels.js'
+export {
+  GameConfigFileError,
+  GameConfigInvalidError,
+  GameConfigMalformedError,
+  GameConfigUnreadableError,
+  loadGameConfigFile,
+} from './file.js'
 
 /** One versioned snapshot of the game's numbers. */
 export interface GameConfig {

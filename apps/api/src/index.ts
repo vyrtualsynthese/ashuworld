@@ -1,7 +1,8 @@
 import { fileURLToPath } from 'node:url'
+import { loadGameConfigFile } from '@ashuworld/gameconfig'
 import { createPool } from '@ashuworld/ledger'
 import { loadEnv } from './config.js'
-import { loadGameConfigFromFile, start } from './main.js'
+import { start } from './main.js'
 
 /**
  * The process shell. All the logic lives in `config.ts`, `main.ts` and `server.ts`, so
@@ -16,7 +17,7 @@ const configPath = fileURLToPath(
 async function main(): Promise<void> {
   try {
     const env = loadEnv()
-    const cfg = loadGameConfigFromFile(configPath)
+    const cfg = loadGameConfigFile(configPath)
     const pool = createPool(env.DATABASE_URL)
     const { stop } = await start({ env, pool, cfg })
 

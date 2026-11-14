@@ -217,6 +217,39 @@ describe('Account, signed out', () => {
     expect(screen.queryByRole('link', { name: /dev account/i })).not.toBeInTheDocument()
   })
 
+  it('warns a signed-out fan from a detach that the forfeit is permanent', async () => {
+    vi.stubEnv('VITE_DEV_LOGIN', 'true')
+    stubFetch(() =>
+      jsonResponse({ error: { code: 'unauthenticated', message: 'sign in to continue' } }, 401),
+    )
+
+    renderPage(<Account />, '/account?reattach=twitch')
+
+    const notice = await screen.findByRole('region', { name: /twitch account is detached/i })
+    expect(within(notice).getByText(/forfeited for good/i)).toBeInTheDocument()
+    expect(within(notice).getByText(/forfeit cannot be undone/i)).toBeInTheDocument()
+
+    // The news comes before the button that acts on it: the panel must precede sign-in.
+    const signIn = screen.getByRole('region', { name: /sign in to ashuworld/i })
+    expect(
+      notice.compareDocumentPosition(signIn) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('shows no detached notice for a reattach value that is not a known provider', async () => {
+    vi.stubEnv('VITE_DEV_LOGIN', 'true')
+    stubFetch(() =>
+      jsonResponse({ error: { code: 'unauthenticated', message: 'sign in to continue' } }, 401),
+    )
+
+    renderPage(<Account />, '/account?reattach=%3Cb%3Eevil')
+
+    expect(await screen.findByRole('heading', { name: /sign in/i })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('region', { name: /account is detached/i }),
+    ).not.toBeInTheDocument()
+  })
+
   it('offers a retry when the account cannot be loaded at all', async () => {
     let attempts = 0
     stubFetch(() => {
@@ -383,6 +416,9 @@ describe('Account, signed in', () => {
     expect(
       screen.getByRole('heading', { name: 'Ashu' }),
     ).toBeInTheDocument()
+    // Signed in, the shorter re-attach panel is the whole story; the signed-out notice
+    // would say the same thing twice.
+    expect(screen.queryByText(/forfeited for good/i)).not.toBeInTheDocument()
   })
 
   it('does not claim a provider is detached when that provider is still attached', async () => {
