@@ -84,7 +84,7 @@ export function Profile() {
             Il n’y a pas de Dachi @{handle} sur AshuWorld. Le pseudo est peut-être mal
             orthographié, ou ce Dachi ne s’est pas encore inscrit.
           </p>
-          <Link className="button" to="/ladder">
+          <Link className="button" to="/">
             Retour au classement
           </Link>
         </main>

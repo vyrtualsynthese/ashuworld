@@ -313,7 +313,7 @@ describe('Profile', () => {
     expect(screen.getByText(/nobody/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /retour au classement/i })).toHaveAttribute(
       'href',
-      '/ladder',
+      '/',
     )
   })
 

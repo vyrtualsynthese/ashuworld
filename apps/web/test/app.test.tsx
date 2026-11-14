@@ -10,14 +10,18 @@ function renderAt(path: string): void {
 }
 
 describe('the route table', () => {
-  it('serves the home page at the root, with the three places to go', async () => {
+  it('serves the ladder at the root and names the three places to go', async () => {
+    stubFetch(() => jsonResponse(LADDER))
+
     renderAt('/')
 
-    expect(await screen.findByRole('heading', { name: 'AshuWorld' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /voir le classement/i })).toHaveAttribute(
-      'href',
-      '/ladder',
-    )
+    expect(
+      await screen.findByRole('heading', { name: 'Classement', level: 1 }),
+    ).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: 'ashu' })).toBeInTheDocument()
+
+    // The brand and the first nav link both lead to the board, which is the homepage.
+    expect(screen.getByRole('link', { name: 'AshuWorld' })).toHaveAttribute('href', '/')
     const nav = screen.getByRole('navigation', { name: /navigation principale/i })
     // The three links are in a fixed order, so the nav reads the same on every page.
     expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual([
@@ -25,10 +29,7 @@ describe('the route table', () => {
       "Gagner de l'XP",
       'Mon compte',
     ])
-    expect(within(nav).getByRole('link', { name: /classement/i })).toHaveAttribute(
-      'href',
-      '/ladder',
-    )
+    expect(within(nav).getByRole('link', { name: /classement/i })).toHaveAttribute('href', '/')
     expect(within(nav).getByRole('link', { name: /gagner de l'xp/i })).toHaveAttribute(
       'href',
       '/xp',
@@ -37,6 +38,17 @@ describe('the route table', () => {
       'href',
       '/account',
     )
+  })
+
+  it('redirects the old /ladder address to the board at the root', async () => {
+    stubFetch(() => jsonResponse(LADDER))
+
+    renderAt('/ladder')
+
+    expect(
+      await screen.findByRole('heading', { name: 'Classement', level: 1 }),
+    ).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: 'ashu' })).toBeInTheDocument()
   })
 
   it('serves the xp page at /xp', async () => {
@@ -49,17 +61,6 @@ describe('the route table', () => {
     ).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Les actions' })).toBeInTheDocument()
     expect(screen.getByText(GAME.actions[0]!.label)).toBeInTheDocument()
-  })
-
-  it('serves the ladder at /ladder', async () => {
-    stubFetch(() => jsonResponse(LADDER))
-
-    renderAt('/ladder')
-
-    expect(
-      await screen.findByRole('heading', { name: 'Classement', level: 1 }),
-    ).toBeInTheDocument()
-    expect(await screen.findByRole('link', { name: 'ashu' })).toBeInTheDocument()
   })
 
   it('serves a profile at /f/:handle', async () => {
