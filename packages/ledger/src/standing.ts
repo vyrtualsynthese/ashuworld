@@ -28,11 +28,15 @@ function firstRow<T>(rows: T[], fanId: string): T {
 }
 
 /**
- * The live-balance select, written once so `computeBalance` and `getStanding` cannot
- * drift apart. `fanRef` is `$1` or a column reference such as `f.id` — always a literal
- * this module supplies, never caller input.
+ * The live-balance select, written once so `computeBalance`, `getStanding` and the public
+ * ladder cannot drift apart. `fanRef` is `$1` or a column reference such as `f.id` —
+ * always a literal this module supplies, never caller input.
+ *
+ * Exported for `ladder.ts`: a ladder that ranked fans by a second, hand-written copy of
+ * this rule would disagree with every balance the rest of the service shows, and the
+ * disagreement would only appear once a detach or a penalty landed.
  */
-function liveBalanceQuery(fanRef: string): string {
+export function liveBalanceQuery(fanRef: string): string {
   return `select coalesce(sum(e.amount), 0)::int as balance
             from xp_entries e
             left join provider_identities i on i.id = e.identity_id
