@@ -136,6 +136,14 @@ export const GAME = {
   levels: [
     { level: 0, minXp: 0 },
     { level: 1, minXp: 100 },
-    { level: 2, minXp: 1500 },
+    { level: 2, minXp: 300 },
+    { level: 3, minXp: 700 },
+    { level: 4, minXp: 1500 },
+    { level: 5, minXp: 3100 },
+    { level: 6, minXp: 6300 },
+    { level: 7, minXp: 12700 },
+    { level: 8, minXp: 25500 },
+    { level: 9, minXp: 51100 },
+    { level: 10, minXp: 102300 },
   ],
 }

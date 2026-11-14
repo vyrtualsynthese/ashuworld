@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { ConfigError, actionAmount, levelForXp, loadGameConfig } from '../src/index.js'
+import { ConfigError, actionAmount, expandLevels, levelForXp, loadGameConfig } from '../src/index.js'
 import { parseActions } from '../src/actions.js'
 
 const followAction = {
@@ -28,6 +28,7 @@ const valid = (): Record<string, unknown> => ({
     { level: 1, minXp: 100 },
     { level: 2, minXp: 300 },
   ],
+  beyond: { step: 1600, factor: 2 },
 })
 
 /** The valid file with one top-level field swapped for an invalid value. */
@@ -46,6 +47,7 @@ function rejection(fn: () => unknown): string {
 
 const loadLevels = (levels: unknown): string => rejection(() => loadGameConfig(withField('levels', levels)))
 const loadActions = (actions: unknown): string => rejection(() => loadGameConfig(withField('actions', actions)))
+const loadBeyond = (beyond: unknown): string => rejection(() => loadGameConfig(withField('beyond', beyond)))
 
 describe('game config', () => {
   it('reads action amounts', () => {
@@ -56,7 +58,7 @@ describe('game config', () => {
     const cfg = loadGameConfig(valid())
     expect(levelForXp(cfg, 0)).toEqual({ level: 0, nextLevelAt: 100 })
     expect(levelForXp(cfg, 100)).toEqual({ level: 1, nextLevelAt: 300 })
-    expect(levelForXp(cfg, 9999)).toEqual({ level: 2, nextLevelAt: null })
+    expect(levelForXp(cfg, 9999)).toEqual({ level: 4, nextLevelAt: 11500 })
   })
 
   it('rejects duplicate or out-of-order level rows', () => {
@@ -198,7 +200,7 @@ describe('loadGameConfig input shape', () => {
 
   it('keeps a __proto__ action key as data instead of treating it as a prototype', () => {
     const raw: unknown = JSON.parse(
-      '{"version":"v1","actions":{"__proto__":{"amount":1,"provider":"dev","label":"Ping","description":"Un ping local."}},"levels":[{"level":0,"minXp":0}]}',
+      '{"version":"v1","actions":{"__proto__":{"amount":1,"provider":"dev","label":"Ping","description":"Un ping local."}},"levels":[{"level":0,"minXp":0}],"beyond":{"step":1,"factor":2}}',
     )
     expect(actionAmount(loadGameConfig(raw), '__proto__')).toBe(1)
   })
@@ -244,7 +246,38 @@ describe('level table validation', () => {
     )
     // A gap in the level numbers is a gap in the ladder, not an ordering problem.
     expect(levelForXp(loadGameConfig({ ...valid(), levels: [{ level: 0, minXp: 0 }, { level: 2, minXp: 100 }] }), 100)).toEqual(
-      { level: 2, nextLevelAt: null },
+      { level: 2, nextLevelAt: 1700 },
+    )
+  })
+})
+
+describe('beyond validation', () => {
+  it('rejects a missing or non-object rule', () => {
+    expect(loadBeyond(undefined)).toBe('beyond must be an object, got undefined')
+    expect(loadBeyond(null)).toBe('beyond must be an object, got null')
+    expect(loadBeyond('curve')).toBe('beyond must be an object, got "curve"')
+    expect(loadBeyond({ factor: 2 })).toBe('beyond.step must be a positive integer, got undefined')
+  })
+
+  it('rejects a step that is zero, negative or fractional', () => {
+    const step = (value: unknown): string => loadBeyond({ step: value, factor: 2 })
+    expect(step(0)).toBe('beyond.step must be a positive integer, got 0')
+    expect(step(-1)).toBe('beyond.step must be a positive integer, got -1')
+    expect(step(1.5)).toBe('beyond.step must be a positive integer, got 1.5')
+    expect(step('1600')).toBe('beyond.step must be a positive integer, got "1600"')
+  })
+
+  it('rejects a factor of 1 or below, and says why', () => {
+    const factor = (value: unknown): string => loadBeyond({ step: 1600, factor: value })
+    for (const value of [1, 0.5, 0, -2]) {
+      expect(factor(value)).toBe(
+        `beyond.factor must be a number greater than 1, got ${String(value)}; ` +
+          'a factor of 1 would make every level equally expensive',
+      )
+    }
+    expect(factor('2')).toBe(
+      'beyond.factor must be a number greater than 1, got "2"; ' +
+        'a factor of 1 would make every level equally expensive',
     )
   })
 })
@@ -265,7 +298,7 @@ describe('levelForXp', () => {
   })
 
   it('rejects a hand-built config without level rows', () => {
-    expect(rejection(() => levelForXp({ version: 'v1', actions: {}, levels: [] }, 0))).toBe(
+    expect(rejection(() => levelForXp({ version: 'v1', actions: {}, levels: [], beyond: { step: 1, factor: 2 } }, 0))).toBe(
       'no level row covers xp 0',
     )
   })
@@ -305,7 +338,7 @@ describe('shipped config/game.json', () => {
   const cfg = loadGameConfig(raw)
 
   it('carries the version the tests pin', () => {
-    expect(cfg.version).toBe('2026-11-14.1')
+    expect(cfg.version).toBe('2026-11-14.2')
   })
 
   it('pins the three alpha actions and their platforms', () => {
@@ -340,7 +373,7 @@ describe('shipped config/game.json', () => {
     })
   })
 
-  it('holds the five-row level table', () => {
+  it('holds the five-row level table and the rule that continues it', () => {
     expect(cfg.levels).toEqual([
       { level: 0, minXp: 0 },
       { level: 1, minXp: 100 },
@@ -348,8 +381,45 @@ describe('shipped config/game.json', () => {
       { level: 3, minXp: 700 },
       { level: 4, minXp: 1500 },
     ])
+    expect(cfg.beyond).toEqual({ step: 1600, factor: 2 })
     expect(levelForXp(cfg, 1499)).toEqual({ level: 3, nextLevelAt: 1500 })
-    expect(levelForXp(cfg, 1500)).toEqual({ level: 4, nextLevelAt: null })
+    expect(levelForXp(cfg, 1500)).toEqual({ level: 4, nextLevelAt: 3100 })
+  })
+
+  it('continues past the table by doubling the gap', () => {
+    expect(levelForXp(cfg, 3100)).toEqual({ level: 5, nextLevelAt: 6300 })
+    expect(levelForXp(cfg, 6300)).toEqual({ level: 6, nextLevelAt: 12700 })
+    const high = levelForXp(cfg, 999999)
+    expect(high.level).toBe(13)
+    expect(high.nextLevelAt).toBe(1638300)
+    expect(Number.isFinite(high.nextLevelAt)).toBe(true)
+  })
+
+  it('never goes backwards and always has a next threshold across a sweep', () => {
+    let previous = { level: 0, nextLevelAt: 0 }
+    for (let xp = 0; xp <= 100_000; xp += 37) {
+      const position = levelForXp(cfg, xp)
+      expect(position.level).toBeGreaterThanOrEqual(previous.level)
+      expect(position.nextLevelAt).toBeGreaterThan(xp)
+      expect(position.nextLevelAt).toBeGreaterThanOrEqual(previous.nextLevelAt)
+      previous = position
+    }
+  })
+
+  it('expands the table to level 10 with the same curve', () => {
+    expect(expandLevels(cfg, 10)).toEqual([
+      { level: 0, minXp: 0 },
+      { level: 1, minXp: 100 },
+      { level: 2, minXp: 300 },
+      { level: 3, minXp: 700 },
+      { level: 4, minXp: 1500 },
+      { level: 5, minXp: 3100 },
+      { level: 6, minXp: 6300 },
+      { level: 7, minXp: 12700 },
+      { level: 8, minXp: 25500 },
+      { level: 9, minXp: 51100 },
+      { level: 10, minXp: 102300 },
+    ])
   })
 })
 

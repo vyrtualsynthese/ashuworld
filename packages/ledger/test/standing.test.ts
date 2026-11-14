@@ -28,6 +28,7 @@ const cfg: GameConfig = {
     { level: 2, minXp: 300 },
     { level: 3, minXp: 700 },
   ],
+  beyond: { step: 1600, factor: 2 },
 }
 
 /**

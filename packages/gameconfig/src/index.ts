@@ -1,10 +1,16 @@
 import { parseActions, type ActionDef, type ActionKey } from './actions.js'
-import { parseLevels, type LevelRow } from './levels.js'
+import { parseBeyond, parseLevels, type BeyondConfig, type LevelRow } from './levels.js'
 import { ConfigError, isRecord } from './validate.js'
 
 export { ConfigError } from './validate.js'
 export { actionAmount, type ActionDef, type ActionKey } from './actions.js'
-export { levelForXp, type LevelPosition, type LevelRow } from './levels.js'
+export {
+  expandLevels,
+  levelForXp,
+  type BeyondConfig,
+  type LevelPosition,
+  type LevelRow,
+} from './levels.js'
 export {
   GameConfigFileError,
   GameConfigInvalidError,
@@ -18,6 +24,8 @@ export interface GameConfig {
   version: string
   actions: Record<ActionKey, ActionDef>
   levels: LevelRow[]
+  /** The rule that continues `levels` past its last explicit row. */
+  beyond: BeyondConfig
 }
 
 /**
@@ -42,5 +50,6 @@ export function loadGameConfig(raw: unknown): GameConfig {
     version,
     actions: parseActions(Object.entries(rawActions)),
     levels: parseLevels(raw['levels']),
+    beyond: parseBeyond(raw['beyond']),
   }
 }

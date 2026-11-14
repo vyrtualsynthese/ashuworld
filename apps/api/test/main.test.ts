@@ -17,6 +17,7 @@ const cfg: GameConfig = {
     { level: 0, minXp: 0 },
     { level: 1, minXp: 100 },
   ],
+  beyond: { step: 1600, factor: 2 },
 }
 
 const env = loadEnv({
@@ -174,6 +175,7 @@ describe('loadGameConfigFile', () => {
           { level: 0, minXp: 0 },
           { level: 1, minXp: 100 },
         ],
+        beyond: { step: 1600, factor: 2 },
       }),
     )
 

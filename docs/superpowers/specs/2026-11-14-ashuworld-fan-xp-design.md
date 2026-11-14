@@ -236,9 +236,11 @@ never waits on a third-party call.
 ### Level and action table
 
 A versioned file, loaded at start: action keys with values, plus a level table
-(threshold XP per level). A Dachi's `level` is recomputed on change and only ever rises for a
-given `peak_xp`. Numbers are a separate gameplay pass; this design fixes the structure,
-not the values.
+(threshold XP per level) and the rule that continues it. The table is a prefix, not a
+ceiling: past its last row the curve keeps going, each level costing more than the one
+before (the shipped gaps double). A Dachi's `level` is recomputed on change and only ever
+rises for a given `peak_xp`: a level is never lost, and no level is final. Numbers are a
+separate gameplay pass; this design fixes the structure, not the values.
 
 Alpha actions, all verified by the platform that owns them:
 
