@@ -25,6 +25,7 @@
 - Configuration comes from the environment, with these names: `DATABASE_URL`, `PORT` (default 3000), `SESSION_COOKIE_NAME`, `COOKIE_SECURE`, `PUBLIC_BASE_URL`, `ALLOW_DEV_LOGIN`, `GAME_CONFIG_VERSION`, `ALPHA_RESET_CONFIRM`.
 - Integration tests need a real Postgres in `TEST_DATABASE_URL`; CI provides it as a service container. No test may point at a real deployment.
 - **Coverage floor: 80% lines, branches, functions and statements**, enforced by `vitest --coverage` in CI. A change that drops the workspace below the floor fails the build; there is no per-file exception.
+- **Every workspace package declares `test`, `typecheck` and `build` scripts.** `pnpm -r` silently skips a package that lacks them, so a missing script is a gate that never runs rather than an error.
 - **Every exploit path gets a test, not a comment.** Authorisation mistakes, cross-fan access, replayed events, reused handshakes, guessed session ids, leaked identifiers in public payloads and a reset that fires without confirmation each have a named negative test in the task that owns the code, and a task is not done until its negative tests fail for the right reason before the guard exists.
 
 ## Review Focus
