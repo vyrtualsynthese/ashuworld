@@ -59,6 +59,14 @@ jobs:
 
       - run: pnpm test:coverage
 
+      # The web CSP allows `script-src 'self'` and `style-src 'self'` with no hash, so an
+      # inline script or style that a future Vite plugin emits would break the page in the
+      # browser and nowhere in the test suite. This builds the bundle and refuses one.
+      - name: The built bundle is CSP-clean
+        run: |
+          pnpm --filter @ashuworld/web build
+          node scripts/check-web-csp.mjs
+
   helm:
     name: helm
     runs-on: ubuntu-latest
@@ -74,10 +82,12 @@ jobs:
       # swapped download fails here instead of running a different binary.
       - name: Install Helm
         run: |
-          curl -fsSLO https://get.helm.sh/helm-v4.2.4-linux-amd64.tar.gz
-          curl -fsSLO https://get.helm.sh/helm-v4.2.4-linux-amd64.tar.gz.sha256sum
-          sha256sum -c helm-v4.2.4-linux-amd64.tar.gz.sha256sum
-          tar -xzf helm-v4.2.4-linux-amd64.tar.gz -C /tmp
+          curl -fsSL --retry 3 --retry-all-errors -o /tmp/helm-v4.2.4-linux-amd64.tar.gz \
+            https://get.helm.sh/helm-v4.2.4-linux-amd64.tar.gz
+          curl -fsSL --retry 3 --retry-all-errors -o /tmp/helm-v4.2.4-linux-amd64.tar.gz.sha256sum \
+            https://get.helm.sh/helm-v4.2.4-linux-amd64.tar.gz.sha256sum
+          (cd /tmp && sha256sum -c helm-v4.2.4-linux-amd64.tar.gz.sha256sum)
+          tar -xzf /tmp/helm-v4.2.4-linux-amd64.tar.gz -C /tmp
           sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
           helm version --short
 
@@ -219,6 +229,7 @@ jobs:
 
       - name: The api answers its health route from a read-only filesystem
         run: |
+          trap 'docker rm -f api' EXIT
           docker run -d --name api --network host --read-only \
             -e DATABASE_URL=postgres://ashu:ashu@127.0.0.1:5432/ashu \
             -e PUBLIC_BASE_URL=http://localhost:3000 \
@@ -229,13 +240,14 @@ jobs:
           done
           cat /tmp/health.json
           grep -q '"ok":true' /tmp/health.json
-          docker rm -f api
 
       # The pages are served by nginx, not by the api, so its header set has its own check.
-      # The four greps are the contract: a missing include in a location block drops the
-      # whole snippet there, and only a real response shows that.
+      # Each grep asserts the value, not just the header's presence: a location block that
+      # drops the snippet loses the header, and a typo in the value is just as broken. Only
+      # a real response shows either.
       - name: The web image sends the security headers
         run: |
+          trap 'docker rm -f web' EXIT
           docker run -d --name web -p 8080:8080 "$IMAGE_PREFIX/web:$GITHUB_SHA"
           for _ in $(seq 1 30); do
             if curl -fsS -I http://127.0.0.1:8080/ > /tmp/web-headers.txt; then break; fi
@@ -243,9 +255,10 @@ jobs:
           done
           cat /tmp/web-headers.txt
           grep -qi 'content-security-policy:.*default-src' /tmp/web-headers.txt
-          grep -qi 'strict-transport-security:' /tmp/web-headers.txt
+          grep -qi 'strict-transport-security: max-age=31536000; includeSubDomains' /tmp/web-headers.txt
           grep -qi 'x-content-type-options: nosniff' /tmp/web-headers.txt
-          grep -qi 'referrer-policy:' /tmp/web-headers.txt
+          grep -qi 'referrer-policy: strict-origin-when-cross-origin' /tmp/web-headers.txt
+          grep -qi 'permissions-policy:' /tmp/web-headers.txt
           # The hashed assets live in their own location block with its own include, and
           # their names change every build, so the URL is read from the served document.
           curl -fsS http://127.0.0.1:8080/ > /tmp/web-index.html
@@ -255,4 +268,3 @@ jobs:
           cat /tmp/web-asset-headers.txt
           grep -qi 'x-content-type-options: nosniff' /tmp/web-asset-headers.txt
           grep -qi 'content-security-policy:.*default-src' /tmp/web-asset-headers.txt
-          docker rm -f web

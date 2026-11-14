@@ -20,10 +20,13 @@ server {
   # and the `return 404` block. Browsers ignore it over plain HTTP, which is what keeps the
   # local stack usable.
   #
-  # The rest of the set lives in security-headers.conf, and nginx does not pass a server
-  # level `add_header` down to a location that declares one of its own: every location
-  # below that sets a header must `include` the snippet, or its response loses the whole
-  # set. That is why the include appears three times, and why the snippet repeats HSTS.
+  # The rest of the set lives only in security-headers.conf, so it cannot leak onto `/api`
+  # or `/auth`: the api sends its own deny-all policy, and a duplicated snippet here would
+  # override it with the SPA's. nginx does not pass a server level `add_header` down to a
+  # location that declares one of its own, so every SPA location — `/assets/`, the exact
+  # document and `/` — includes the snippet, and that is why the include appears three
+  # times. The snippet repeats the HSTS line above because a location with any `add_header`
+  # inherits nothing from the server block.
   add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
   # Never proxy to an upstream that a caller can influence, and keep the Host the client

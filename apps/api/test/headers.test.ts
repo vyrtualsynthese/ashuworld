@@ -57,15 +57,18 @@ async function withApp(run: (app: FastifyInstance) => Promise<void>): Promise<vo
 }
 
 describe('security headers', () => {
-  it('sets a deny-all CSP and the fixed headers on every route', async () => {
+  it('sets a deny-all CSP and the fixed headers on representative routes', async () => {
     await withApp(async (app) => {
       for (const url of ['/api/health', '/api/public/game']) {
         const res = await app.inject({ method: 'GET', url })
         expect(res.headers['content-security-policy']).toContain("default-src 'none'")
         expect(res.headers['content-security-policy']).toContain("frame-ancestors 'none'")
+        expect(res.headers['content-security-policy']).toContain("base-uri 'none'")
+        expect(res.headers['content-security-policy']).toContain("form-action 'none'")
         expect(res.headers['x-content-type-options']).toBe('nosniff')
         expect(res.headers['referrer-policy']).toBe('no-referrer')
         expect(res.headers['cross-origin-opener-policy']).toBe('same-origin')
+        expect(res.headers['cross-origin-resource-policy']).toBe('same-origin')
         expect(res.headers['strict-transport-security']).toBe(
           'max-age=31536000; includeSubDomains',
         )

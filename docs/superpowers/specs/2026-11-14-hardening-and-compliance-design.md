@@ -167,7 +167,7 @@ follows `TRUST_PROXY`):
 
 | Scope | Default | Why |
 |---|---|---|
-| `/auth/*` | 20 requests / minute | A sign-in is a browser redirect, not polling; this stops a script from burning handshakes. |
+| `/auth/*` | 20 per minute, per route (start, callback, logout each have their own counter) | A sign-in is a browser redirect, not polling; this stops a script from burning handshakes. |
 | detach | 10 / minute | A destructive write a human does once. |
 | `/api/public/*` | 120 / minute | Generous enough for a crowd behind one NAT; still bounds scraping. |
 

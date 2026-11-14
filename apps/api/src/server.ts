@@ -20,7 +20,7 @@ import { registerIdentityRoutes } from './routes/identities.js'
 import { registerMeRoutes } from './routes/me.js'
 import { registerPublicRoutes } from './routes/public.js'
 import { helmetOptions } from './security/headers.js'
-import { rateLimitOptions } from './security/rateLimit.js'
+import { RATE_LIMITED_CODE, RATE_LIMITED_MESSAGE, rateLimitOptions } from './security/rateLimit.js'
 
 export interface ServerDeps {
   pool: Pool
@@ -177,9 +177,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       if (typeof retryAfter === 'number') {
         reply.header('Retry-After', String(Math.ceil(retryAfter / 1000)))
       }
-      return reply
-        .code(429)
-        .send(errorBody('rate_limited', 'too many requests in a short window; wait a moment and try again'))
+      return reply.code(429).send(errorBody(RATE_LIMITED_CODE, RATE_LIMITED_MESSAGE))
     }
     if (typeof status === 'number' && status >= 400 && status <= 499) {
       const response = CLIENT_ERRORS[status] ?? FALLBACK_CLIENT_ERROR
@@ -212,6 +210,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // route added directly in this function is added immediately, so declaring the routes
   // inside `after` is what makes the per-route budgets apply. `after` keeps `buildServer`
   // synchronous, which every test and `src/index.ts` relies on.
+  //
+  // A route registered directly in `buildServer`, outside this block, fails silently: the
+  // hook has not loaded yet, so its `config.rateLimit` is ignored and it keeps only the
+  // global public budget.
   app.after(() => {
     registerHealthRoutes(app, pool)
     registerPublicRoutes(app, { pool, cfg })
