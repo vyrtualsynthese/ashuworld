@@ -5,6 +5,7 @@ import { ConfigError, type GameConfig } from '@ashuworld/gameconfig'
 import { AwardConflictError, HandleTakenError, PenaltyError } from '@ashuworld/ledger'
 import type { Env } from './config.js'
 import { errorBody } from './errors.js'
+import { HandleExhaustedError } from './auth/handles.js'
 import { registerAuthRoutes } from './routes/auth.js'
 import { registerHealthRoutes } from './routes/health.js'
 import { registerMeRoutes } from './routes/me.js'
@@ -13,6 +14,11 @@ export interface ServerDeps {
   pool: Pool
   cfg: GameConfig
   env: Env
+  /**
+   * Replaces pino's destination. Tests use it to inspect what would reach the log store;
+   * production leaves it unset and pino writes to standard output.
+   */
+  logStream?: { write(line: string): void }
 }
 
 /**
@@ -34,6 +40,17 @@ const FALLBACK_CLIENT_ERROR = { code: 'client_error', message: 'the request was 
 const NOT_FOUND_MESSAGE = 'the requested resource does not exist'
 
 /**
+ * A request URL without its query string.
+ *
+ * The OAuth callback carries `code` and `state` in the query, and both are credentials:
+ * the code proves the provider's answer, the state proves the handshake. Neither may reach
+ * a log line that an operator or a log-shipping pipeline can read.
+ */
+function pathOnly(url: string | undefined): string {
+  return (url ?? '').split('?')[0] ?? ''
+}
+
+/**
  * Builds the HTTP layer and never opens a socket.
  *
  * `src/index.ts` owns `listen`; tests call `app.inject()`. That split is what lets every
@@ -45,7 +62,21 @@ const NOT_FOUND_MESSAGE = 'the requested resource does not exist'
  */
 export function buildServer(deps: ServerDeps): FastifyInstance {
   const { pool, cfg, env } = deps
-  const app = Fastify({ logger: true })
+  const app = Fastify({
+    logger: {
+      level: 'info',
+      // Fastify logs `req` for every request and again for the response; without this
+      // serializer the callback's query string, and with it the code and state, would be
+      // written twice per sign-in.
+      serializers: {
+        req: (request: { method: string; url?: string }) => ({
+          method: request.method,
+          url: pathOnly(request.url),
+        }),
+      },
+      ...(deps.logStream === undefined ? {} : { stream: deps.logStream }),
+    },
+  })
 
   // Sessions arrive in the cookie `requireFan` reads, and leave in the one logout clears.
   // Registering the plugin here means every route that needs `reply.setCookie` or
@@ -80,6 +111,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(409).send(errorBody('handle_taken', error.message))
     }
 
+    if (error instanceof HandleExhaustedError) {
+      app.log.error({ err: error }, 'no free handle could be derived for a new fan')
+      return reply.code(500).send(errorBody('handle_exhausted', error.message))
+    }
+
     // Fastify's schema validation attaches the failures to the error. The message names
     // the field and what it expected, which is exactly what the caller needs to fix the
     // request, and it contains nothing from the server's own state.
@@ -98,7 +134,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(status).send(errorBody(response.code, response.message))
     }
 
-    app.log.error({ err: error, url: request.url, method: request.method }, 'unhandled error while serving a request')
+    app.log.error(
+      { err: error, url: pathOnly(request.url), method: request.method },
+      'unhandled error while serving a request',
+    )
     return reply
       .code(500)
       .send(errorBody('internal', 'the server could not complete the request'))
