@@ -1,12 +1,18 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { Pool } from 'pg'
 import type { GameConfig } from '@ashuworld/gameconfig'
-import type { IdentityProfile } from '@ashuworld/providers'
+import {
+  discoveryEventId,
+  type DiscoveredPerson,
+  type ProviderName,
+} from '@ashuworld/providers'
 import {
   ensureIdentity,
+  enqueueEvent,
   erasedExternalId,
   findIdentityForLogin,
   linkIdentity,
+  monthKey,
   recordTermsAcceptance,
   refreshIdentityHandle,
   touchLastSeen,
@@ -26,6 +32,7 @@ import { createFanWithUniqueHandle } from '../auth/handles.js'
 import {
   ProviderExchangeError,
   createProviderRegistry,
+  type ExchangeResult,
   type ProviderRegistry,
 } from '../auth/providers.js'
 import {
@@ -156,6 +163,79 @@ type LinkOutcome =
   | { kind: 'same_provider' }
   | { kind: 'already_owned' }
 
+/** The platforms the worker has a processor for, and so the only ones worth queueing. */
+type PayingProvider = 'twitch' | 'discord' | 'youtube'
+
+/**
+ * Narrows a proven identity's provider to the platforms the worker pays.
+ *
+ * The dev door proves nothing — its `exchange` answers an empty `verifiedActions` — so a
+ * verified action attributed to it is a wiring mistake, not a fact to queue. Writing it
+ * would leave a row no processor ever claims; failing loudly here turns that mistake into
+ * a log line the caller can see, without touching the sign-in it already completed.
+ */
+function payingProvider(provider: ProviderName): PayingProvider {
+  switch (provider) {
+    case 'twitch':
+    case 'discord':
+    case 'youtube':
+      return provider
+    case 'dev':
+      throw new Error('the dev provider never reports verified actions')
+  }
+}
+
+/**
+ * Writes what the grant proved to the queue, for the worker to pay.
+ *
+ * The event id names the source, the person, the actions and the month, so it is the same
+ * id every time this sign-in is repeated in the same month: `enqueueEvent` inserts on
+ * conflict and does nothing, which makes a retry — or a second browser — free. A new month
+ * is a new id, because the monthly credit is paid per month.
+ *
+ * `now` is injected so a test can name the month it expects without reading the clock the
+ * route used. It is also why the month in the id is computed here rather than by a
+ * scheduled job: the event belongs to the month in which the fan signed in.
+ */
+export async function enqueueVerifiedActions(
+  pool: Pool,
+  result: ExchangeResult,
+  now: Date = new Date(),
+): Promise<void> {
+  if (result.verifiedActions.length === 0) return
+
+  const person: DiscoveredPerson = {
+    provider: payingProvider(result.profile.provider),
+    externalId: result.profile.externalId,
+    displayHandle: result.profile.displayHandle,
+    displayName: result.profile.displayName,
+    actions: result.verifiedActions,
+  }
+
+  await enqueueEvent(pool, {
+    provider: person.provider,
+    eventId: discoveryEventId('signin', person, monthKey(now)),
+    payload: { kind: 'discovery', ...person },
+  })
+}
+
+/**
+ * The callback's use of `enqueueVerifiedActions`, which never fails the sign-in.
+ *
+ * By the time this runs the sign-in is settled: the session is committed, or the link is
+ * attached to a fan who already had one. A queue outage must not turn that into an error
+ * page. Nothing is lost by swallowing it: the same sign-in next month — or the same fan
+ * retrying now — derives the same event id, and the log line is what tells an operator the
+ * queue was missed in the meantime.
+ */
+async function enqueueQuietly(pool: Pool, result: ExchangeResult): Promise<void> {
+  try {
+    await enqueueVerifiedActions(pool, result)
+  } catch (error) {
+    console.error('[api] the sign-in event was not queued', error)
+  }
+}
+
 /**
  * Resolves the fan behind a provider identity, in the order the plan fixes:
  *
@@ -194,10 +274,11 @@ type LinkOutcome =
  */
 async function resolveLogin(
   deps: AuthRouteDeps,
-  profile: IdentityProfile,
+  result: ExchangeResult,
   termsVersion: string | null,
 ): Promise<LoginOutcome> {
   return withTransaction(deps.pool, async (tx) => {
+    const profile = result.profile
     const match = await findIdentityForLogin(tx, {
       provider: profile.provider,
       externalId: profile.externalId,
@@ -282,14 +363,14 @@ async function resolveLink(
   deps: AuthRouteDeps,
   request: FastifyRequest,
   handshake: Extract<Handshake, { purpose: 'link' }>,
-  profile: IdentityProfile,
+  result: ExchangeResult,
 ): Promise<LinkOutcome> {
   return withTransaction(deps.pool, async (tx) => {
     const ownerFanId = await sessionFanId(tx, request, deps.env)
     if (ownerFanId === null) return { kind: 'unauthenticated' }
     if (ownerFanId !== handshake.fanId) return { kind: 'not_owner' }
 
-    const identity = await ensureIdentity(tx, profile)
+    const identity = await ensureIdentity(tx, result.profile)
     const linked = await linkIdentity(tx, {
       fanId: handshake.fanId,
       identityId: identity.id,
@@ -428,22 +509,22 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         return reply.code(400).send(errorBody('consent_required', CONSENT_REQUIRED))
       }
 
-      // `verifiedActions` is deliberately ignored here: this task wires the provider in,
-      // and the callback that turns a verified action into a ledger entry comes later.
-      let profile: IdentityProfile
+      // The exchange proves the identity and, for Twitch, the actions the grant carried.
+      // Both are kept: the identity resolves the fan below, and the actions are queued
+      // once that fan is settled.
+      let result: ExchangeResult
       try {
-        const result = await provider.exchange({
+        result = await provider.exchange({
           code,
           redirectUri: callbackUri(deps.env, provider.name),
         })
-        profile = result.profile
       } catch (error) {
         if (!(error instanceof ProviderExchangeError)) throw error
         return reply.code(error.httpStatus).send(errorBody('provider_error', error.message))
       }
 
       if (handshake.purpose === 'link') {
-        const outcome = await resolveLink(deps, request, handshake, profile)
+        const outcome = await resolveLink(deps, request, handshake, result)
         switch (outcome.kind) {
           case 'unauthenticated':
             return reply.code(401).send(errorBody('unauthenticated', UNAUTHENTICATED))
@@ -465,18 +546,26 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
           case 'linked':
             // No cookie: this fan already has a session, and a link proves an identity,
             // not a new browser. Minting a second session here would add nothing.
+            //
+            // The link is a sign-in with a fan already known, so the actions the grant
+            // proved are queued for that fan, exactly as a login would queue them.
+            await enqueueQuietly(deps.pool, result)
             return reply.redirect('/account', 302)
         }
       }
 
-      const outcome = await resolveLogin(deps, profile, handshake.termsVersion)
+      const outcome = await resolveLogin(deps, result, handshake.termsVersion)
       if (outcome.kind === 'reattach') {
         // The identity is detached but was once attached. Signing in would silently undo
         // the fan's own detach; ask them to confirm by starting a link handshake instead.
+        // Nothing is queued either: the fan this action names never signed in.
         return reply.redirect(`/account?reattach=${encodeURIComponent(provider.name)}`, 302)
       }
 
       setSessionCookie(reply, deps.env, outcome.sessionId)
+      // After the cookie is set: the sign-in is already committed and answered, so a queue
+      // failure is logged by `enqueueQuietly` instead of failing the callback.
+      await enqueueQuietly(deps.pool, result)
       return reply.redirect('/account', 302)
     },
   )
