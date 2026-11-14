@@ -30,7 +30,11 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@22.20.5)
 
-  packages/providers: {}
+  packages/providers:
+    devDependencies:
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@22.20.5)
 
 packages:
 
