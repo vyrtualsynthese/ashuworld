@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { actionAmount, type GameConfig } from '@ashuworld/gameconfig'
 import type { ProviderName } from '@ashuworld/providers'
-import { awardOnce, ensureIdentity, ingestEvent, withTransaction, type Queryable } from '../src/index.js'
+import {
+  AwardConflictError,
+  awardOnce,
+  ensureIdentity,
+  ingestEvent,
+  withTransaction,
+  type Queryable,
+} from '../src/index.js'
 import { createTestDb, type TestDb } from './helpers/db.js'
 
 // The amounts come from a config, never from a literal in the test: it proves the
@@ -79,17 +86,20 @@ describe('awardOnce', () => {
     const first = await withTransaction(db.pool, (tx) => awardOnce(tx, earn(identityId, 'twitch.follow', 'evt-1')))
     const second = await withTransaction(db.pool, (tx) => awardOnce(tx, earn(identityId, 'twitch.follow', 'evt-2')))
     expect(first.awarded).toBe(true)
+    expect(first.reason).toBe('awarded')
     expect(second.awarded).toBe(false)
     expect(await entries()).toHaveLength(1)
   })
 
-  it('names the entry that already spent the one-time key', async () => {
+  it('names the entry that already spent the one-time key, and says so', async () => {
     const identityId = await identity()
     const first = await withTransaction(db.pool, (tx) => awardOnce(tx, earn(identityId, 'twitch.follow', 'evt-1')))
     const second = await withTransaction(db.pool, (tx) => awardOnce(tx, earn(identityId, 'twitch.follow', 'evt-2')))
     expect(first.entryId).not.toBeNull()
-    // A caller that wants to reconcile the refused award needs the row, not just `false`.
+    // A caller that wants to reconcile the refused award needs the row, not just `false`,
+    // and it needs to know this identity really has earned the action before.
     expect(second.entryId).toBe(first.entryId)
+    expect(second.reason).toBe('action_spent')
   })
 
   it('stores the entry it was asked to store', async () => {
@@ -139,6 +149,22 @@ describe('awardOnce', () => {
     )
     expect(replay.awarded).toBe(false)
     expect(replay.entryId).toBe(first.entryId)
+    expect(replay.reason).toBe('key_seen')
+    expect(await entries()).toHaveLength(1)
+  })
+
+  it('blames the entry that owns the key when another identity reuses it', async () => {
+    const ashu = await identity('t-1', 'ashu')
+    const other = await identity('t-2', 'other')
+    const first = await withTransaction(db.pool, (tx) => awardOnce(tx, earn(ashu, 'twitch.follow', 'evt-shared')))
+    // A key-derivation bug hands `other` an id the first fan already spent. The refusal
+    // is right, but the entry it names belongs to a different identity, and the reason
+    // has to say so: a caller that logs `entryId` must not read this as "other was paid".
+    const collision = await withTransaction(db.pool, (tx) =>
+      awardOnce(tx, earn(other, 'twitch.follow', 'evt-shared')),
+    )
+    expect(first.reason).toBe('awarded')
+    expect(collision).toEqual({ awarded: false, entryId: first.entryId, reason: 'key_seen' })
     expect(await entries()).toHaveLength(1)
   })
 
@@ -152,15 +178,25 @@ describe('awardOnce', () => {
       ),
     )
     expect(results.filter((result) => result.awarded)).toHaveLength(1)
+    expect(results.filter((result) => result.reason === 'awarded')).toHaveLength(1)
+    expect(results.filter((result) => result.reason === 'action_spent')).toHaveLength(4)
     expect(new Set(results.map((result) => result.entryId)).size).toBe(1)
     expect(await entries()).toHaveLength(1)
   })
 
-  it('refuses without naming an entry when a conflict leaves no row to read', async () => {
-    // A conflict means a row exists, so an empty read back means it was deleted between
-    // the insert and the read. The caller must not be told it paid.
-    const result = await awardOnce(silent(), earn('00000000-0000-0000-0000-000000000000', 'twitch.follow', 'evt-x'))
-    expect(result).toEqual({ awarded: false, entryId: null })
+  it('fails loud when the insert conflicts but no conflicting entry is visible', async () => {
+    // A bare `on conflict do nothing` catches any unique constraint, including one a
+    // future migration adds. An empty read back means the code does not know why the
+    // database refused, and "not awarded, no entry" would quietly stop paying a fan.
+    const input = earn('00000000-0000-0000-0000-000000000000', 'twitch.follow', 'evt-x')
+    const caught: unknown = await awardOnce(silent(), input).catch((error: unknown) => error)
+    expect(caught).toBeInstanceOf(AwardConflictError)
+    expect(caught).toMatchObject({
+      name: 'AwardConflictError',
+      provider: 'twitch',
+      actionKey: 'twitch.follow',
+      idempotencyKey: 'evt-x',
+    })
   })
 })
 
@@ -210,17 +246,29 @@ describe('ensureIdentity', () => {
       `insert into fans (handle, display_name) values ('ashu', 'Ashu') returning id`,
     )
     const fanId = fans[0]?.id
+    // A fixed past stamp: a `do update` that reset it to now() would pass a mere
+    // "not null" check, and `first_linked_at` is what tells a detached identity apart
+    // from one that was never linked.
     await db.pool.query(
-      `update provider_identities set fan_id = $1, linked_at = now(), first_linked_at = now() where id = $2`,
+      `update provider_identities
+         set fan_id = $1, linked_at = now(), first_linked_at = timestamptz '2020-01-01 00:00:00+00'
+       where id = $2`,
       [fanId, first.id],
     )
     await withTransaction(db.pool, (tx) => ensureIdentity(tx, profile('ashu_renamed')))
-    const { rows } = await db.pool.query<{ fan_id: string | null; linked_at: string | null }>(
-      'select fan_id, linked_at from provider_identities where id = $1',
+    const { rows } = await db.pool.query<{
+      fan_id: string | null
+      linked_at: string | null
+      first_linked_at_kept: boolean
+    }>(
+      `select fan_id, linked_at,
+              first_linked_at = timestamptz '2020-01-01 00:00:00+00' as first_linked_at_kept
+       from provider_identities where id = $1`,
       [first.id],
     )
     expect(rows[0]?.fan_id).toBe(fanId)
     expect(rows[0]?.linked_at).not.toBeNull()
+    expect(rows[0]?.first_linked_at_kept).toBe(true)
   })
 
   it('keeps the same external id on different providers apart', async () => {
