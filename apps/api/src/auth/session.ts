@@ -21,8 +21,9 @@ import { errorBody } from '../errors.js'
 export const SESSION_TTL_DAYS = 30
 export const SESSION_TTL_SECONDS = SESSION_TTL_DAYS * 24 * 60 * 60
 
-/** 32 bytes of entropy, which base64url renders as 43 characters. */
+/** 32 bytes of entropy, which base64url renders as exactly 43 characters. */
 const SESSION_ID_BYTES = 32
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/
 
 const COOKIE_PATH = '/'
 const UNAUTHENTICATED_MESSAGE = 'sign in to continue'
@@ -72,17 +73,35 @@ export async function createSession(tx: Queryable, fanId: string): Promise<strin
 }
 
 /**
+ * True for a value shaped like an id `createSession` could have issued.
+ *
+ * Checked before any query. Postgres would happily answer a text lookup for `'abc'`, but
+ * a cookie is caller-controlled and there is no reason to hand an arbitrary string to the
+ * database on every request: the shape is the cheapest filter, and it keeps a malformed
+ * value from costing a connection or reaching a query log.
+ */
+export function isSessionId(value: string): boolean {
+  return SESSION_ID_PATTERN.test(value)
+}
+
+/**
  * Reads the fan behind a session id, or `null` when the row is missing or expired.
  *
  * Expiry is checked in the select, not in TypeScript, so an expired row can never be
  * mistaken for a live one because the application clock and the database clock disagree.
  * The row itself is left in place: a nightly delete is a separate concern from deciding
  * whether a request is signed in.
+ *
+ * A value that is not shaped like a session id is answered as signed out without a query.
+ * Repeating the check here as well as in `requireFan` means a future caller that reaches
+ * this function directly cannot skip it.
  */
 export async function readSession(
   tx: Queryable,
   id: string,
 ): Promise<{ fanId: string } | null> {
+  if (!isSessionId(id)) return null
+
   const { rows } = await tx.query<{ fan_id: string }>(
     `select fan_id
        from sessions
@@ -113,9 +132,13 @@ export function setSessionCookie(
 /**
  * Removes the cookie from the browser. The attributes match the ones it was set with, so
  * a browser that scopes cookies by path and flags finds and deletes the right one.
+ *
+ * `maxAge: 0` is passed explicitly even though `@fastify/cookie` already sets it in
+ * `clearCookie`: this way the `Max-Age=0` header is this code's promise, not a library
+ * detail that a future upgrade could quietly change.
  */
 export function clearSessionCookie(reply: FastifyReply, env: SessionConfig): void {
-  reply.clearCookie(env.SESSION_COOKIE_NAME, cookieAttributes(env))
+  reply.clearCookie(env.SESSION_COOKIE_NAME, { ...cookieAttributes(env), maxAge: 0 })
 }
 
 declare module 'fastify' {
@@ -147,6 +170,13 @@ export function requireFan(deps: AuthDeps): preHandlerHookHandler {
   return async (request, reply) => {
     const sessionId = request.cookies[deps.env.SESSION_COOKIE_NAME]
     if (sessionId === undefined || sessionId === '') {
+      return reply.code(401).send(errorBody('unauthenticated', UNAUTHENTICATED_MESSAGE))
+    }
+
+    // Checked here, before the transaction, so a malformed cookie answers 401 without
+    // taking a connection. `readSession` repeats it for callers that do not come through
+    // this hook.
+    if (!isSessionId(sessionId)) {
       return reply.code(401).send(errorBody('unauthenticated', UNAUTHENTICATED_MESSAGE))
     }
 

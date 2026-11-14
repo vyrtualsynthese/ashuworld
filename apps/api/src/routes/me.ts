@@ -4,6 +4,7 @@ import {
   authenticatedFanId,
   clearSessionCookie,
   destroySession,
+  isSessionId,
   requireFan,
   type AuthDeps,
 } from '../auth/session.js'
@@ -105,6 +106,12 @@ export async function readFanProfile(tx: Queryable, fanId: string): Promise<FanP
  * same 204 and the same cleared cookie, and no error tells them whether the session was
  * real. The row is only deleted when a cookie names one, and an unknown id deletes
  * nothing.
+ *
+ * A failed delete must not change that answer. The point of signing out is to make this
+ * browser stop presenting the cookie; answering 500 would leave the browser holding a
+ * cookie whose server row is still valid. So the failure is logged for the operator and
+ * the cookie is cleared anyway. The row stays until it expires or a later cleanup removes
+ * it, which is the trade-off: the local session ends even when the database cannot say so.
  */
 export function registerMeRoutes(app: FastifyInstance, deps: AuthDeps): void {
   app.get('/api/me', { preHandler: requireFan(deps) }, async (request) => {
@@ -114,8 +121,17 @@ export function registerMeRoutes(app: FastifyInstance, deps: AuthDeps): void {
 
   app.post('/auth/logout', async (request, reply) => {
     const sessionId = request.cookies[deps.env.SESSION_COOKIE_NAME]
-    if (sessionId !== undefined && sessionId !== '') {
-      await withTransaction(deps.pool, (tx) => destroySession(tx, sessionId))
+    if (sessionId !== undefined && isSessionId(sessionId)) {
+      try {
+        await withTransaction(deps.pool, (tx) => destroySession(tx, sessionId))
+      } catch (error) {
+        // The id is not included in this line: a log that names it hands an operator's
+        // log store a live session.
+        request.log.error(
+          { err: error },
+          'logout could not delete the session row; clearing the cookie anyway',
+        )
+      }
     }
     clearSessionCookie(reply, deps.env)
     return reply.code(204).send()
