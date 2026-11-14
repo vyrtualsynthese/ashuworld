@@ -58,6 +58,10 @@ services:
       TRUST_PROXY: "false"
       PORT: "3000"
       LOG_LEVEL: debug
+      # Polling rather than inotify: `git pull`/`git rebase` replace watched files, and the
+      # native watcher can miss the replacement and keep serving the previous build. Slower
+      # on paper, reliable in practice, and this is a development stack.
+      CHOKIDAR_USEPOLLING: "1"
     ports:
       - "3000:3000"
       - "9229:9229"
@@ -85,6 +89,7 @@ services:
     command: ["pnpm", "exec", "tsx", "watch", "--inspect=0.0.0.0:9230", "apps/worker/src/index.ts"]
     environment:
       DATABASE_URL: postgres://ashu:ashu@db:5432/ashu
+      CHOKIDAR_USEPOLLING: "1"
     volumes:
       - .:/app
     depends_on:
@@ -99,6 +104,8 @@ services:
     environment:
       # The browser talks to Vite; Vite forwards /api and /auth to the api container.
       API_PROXY_TARGET: http://api:3000
+      # Same reason as the api and the worker: poll the mounted tree.
+      VITE_USE_POLLING: "1"
     ports:
       - "5173:5173"
     volumes:
