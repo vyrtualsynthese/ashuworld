@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
     "vitest": "^3.2.7"
