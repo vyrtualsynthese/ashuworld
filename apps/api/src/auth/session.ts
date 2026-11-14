@@ -182,6 +182,19 @@ declare module 'fastify' {
 }
 
 /**
+ * Marks a response as personal: no shared or browser cache may keep it.
+ *
+ * `no-store` stops both the browser and any proxy in front of it from writing the
+ * response to disk; the public routes carry `public, max-age=15` instead and are the
+ * only ones that should. `Vary: Cookie` is the second line: a cache that ignores
+ * `no-store` still must not answer one fan's request with another fan's body.
+ */
+export function personalResponse(reply: FastifyReply): void {
+  reply.header('Cache-Control', 'no-store')
+  reply.header('Vary', 'Cookie')
+}
+
+/**
  * The preHandler that authenticates a fan.
  *
  * A factory, not a bare `(request, reply)` handler: the plan's literal signature has no
@@ -220,6 +233,7 @@ export function requireFan(deps: AuthDeps): preHandlerAsyncHookHandler {
     }
 
     request.fanId = session.fanId
+    personalResponse(reply)
   }
 }
 

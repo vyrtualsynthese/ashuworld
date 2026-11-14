@@ -540,6 +540,39 @@ describe('session store', () => {
   })
 })
 
+describe('personal responses', () => {
+  it('marks a signed-in response no-store for every cache', async () => {
+    const fanId = await seedFan()
+    const sessionId = await seedSession(fanId)
+
+    await withApp(async (app) => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/me',
+        headers: cookieHeader(sessionId),
+      })
+
+      expect(res.statusCode).toBe(200)
+      expect(res.headers['cache-control']).toBe('no-store')
+      expect(res.headers['vary']).toContain('Cookie')
+    })
+  })
+
+  it('marks the sign-in redirect no-store', async () => {
+    await withApp(
+      async (app) => {
+        const res = await app.inject({
+          method: 'GET',
+          url: '/auth/dev/start?purpose=login&accept=2026-11-14',
+        })
+
+        expect(res.headers['cache-control']).toBe('no-store')
+      },
+      { env: { ALLOW_DEV_LOGIN: true } },
+    )
+  })
+})
+
 describe('POST /auth/logout', () => {
   it('destroys the session and clears the cookie', async () => {
     const fanId = await seedFan()
