@@ -11,7 +11,21 @@ export interface Queryable {
 }
 
 export function createPool(url: string): Pool {
-  return new pg.Pool({ connectionString: url })
+  const pool = new pg.Pool({ connectionString: url })
+  attachIdleErrorHandler(pool)
+  return pool
+}
+
+/**
+ * An idle client that dies (Postgres restart, a terminated backend, a network blip)
+ * makes the pool emit `error`. Without a listener Node treats it as unhandled and kills
+ * the process, so every pool this module creates logs and carries on; the next query
+ * gets a fresh connection.
+ */
+export function attachIdleErrorHandler(pool: Pool): void {
+  pool.on('error', (error) => {
+    console.error('[ledger] idle postgres client failed; the pool will replace it', error)
+  })
 }
 
 function asQueryable(client: pg.PoolClient): Queryable {
