@@ -12,7 +12,10 @@ import {
   eraseIdentity,
   erasedExternalId,
   exportFan,
+  getFanByHandle,
   linkIdentity,
+  listLadder,
+  purgeBatch,
   withTransaction,
   type FanExport,
 } from '../src/index.js'
@@ -255,5 +258,200 @@ describe('privacy', () => {
       [fanId],
     )
     expect(await withTransaction(db.pool, (tx) => exportFan(tx, rows[0]?.handle ?? ''))).toBeNull()
+  })
+
+  describe('purge and public exclusion', () => {
+    /** Every row in the four tables a purge touches, so a dry run can be compared with itself. */
+    async function tableCounts(): Promise<{
+      fans: number
+      identities: number
+      events: number
+      audit: number
+    }> {
+      const { rows } = await db.pool.query<{
+        fans: number
+        identities: number
+        events: number
+        audit: number
+      }>(
+        `select (select count(*)::int from fans) as fans,
+                (select count(*)::int from provider_identities) as identities,
+                (select count(*)::int from inbound_events) as events,
+                (select count(*)::int from audit_log) as audit`,
+      )
+      const counts = rows[0]
+      if (counts === undefined) throw new Error('expected the table counts')
+      return counts
+    }
+
+    /**
+     * One row of each kind the retention rules target, aged in SQL so the test does not
+     * depend on when the suite happens to run: an account nobody touched for 1,200 days
+     * with one linked identity and a live earn, a provider identity that never joined an
+     * account, a processed event past its 30 days, and an audit row past its 3 years.
+     */
+    async function seedStale(): Promise<void> {
+      const fanId = await seedFan('idle', 'Idle')
+      const linked = await seedIdentity('t-idle', 'idle_tv')
+      await link(fanId, linked)
+      await award(linked, 'twitch.follow', 'idem-idle')
+      await db.pool.query(
+        `update fans set created_at = now() - interval '1200 days' where id = $1`,
+        [fanId],
+      )
+
+      const ghost = await seedIdentity('t-ghost', 'ghost')
+      await db.pool.query(
+        `update provider_identities set created_at = now() - interval '1200 days' where id = $1`,
+        [ghost],
+      )
+
+      await db.pool.query(
+        `insert into inbound_events (provider, event_id, payload, received_at, processed_at)
+         values ('twitch', 'old-event', '{}'::jsonb, now() - interval '60 days', now()),
+                ('twitch', 'fresh-event', '{}'::jsonb, now(), now())`,
+      )
+
+      await db.pool.query(
+        `insert into audit_log (kind, created_at)
+         values ('retention-old', now() - interval '1200 days'),
+                ('retention-fresh', now())`,
+      )
+    }
+
+    it('reports what a purge would remove and writes nothing', async () => {
+      const fanId = await seedFan('idle', 'Idle')
+      await db.pool.query(
+        `update fans set created_at = now() - interval '1200 days' where id = $1`,
+        [fanId],
+      )
+      await db.pool.query(
+        `insert into provider_identities (provider, external_id, display_handle, created_at)
+         values ('twitch', 't-ghost', 'ghost', now() - interval '1200 days')`,
+      )
+      await db.pool.query(
+        `insert into inbound_events (provider, event_id, payload, received_at, processed_at)
+         values ('twitch', 'old-event', '{}'::jsonb, now() - interval '60 days', now())`,
+      )
+      await db.pool.query(
+        `insert into audit_log (kind, created_at) values ('retention-old', now() - interval '1200 days')`,
+      )
+
+      const before = await tableCounts()
+      const result = await purgeBatch(db.pool, { pepper, dryRun: true })
+      expect(result).toEqual({ fans: 1, identities: 1, events: 1, audit: 1 })
+      expect(await tableCounts()).toEqual(before)
+
+      const { rows: fans } = await db.pool.query<{ erased_at: Date | null }>(
+        'select erased_at from fans where id = $1',
+        [fanId],
+      )
+      expect(fans[0]?.erased_at).toBeNull()
+    })
+
+    it('erases the stale rows and keeps the recent ones', async () => {
+      await seedStale()
+      await seedFan('active', 'Active')
+
+      const result = await purgeBatch(db.pool, { pepper, dryRun: false })
+      expect(result).toEqual({ fans: 1, identities: 1, events: 1, audit: 1 })
+
+      const { rows: fans } = await db.pool.query<{
+        handle: string
+        erased_at: Date | null
+      }>(`select handle, erased_at from fans where handle like 'deleted_%'`)
+      expect(fans).toHaveLength(1)
+      expect(fans[0]?.erased_at).toBeInstanceOf(Date)
+
+      const { rows: identities } = await db.pool.query<{ external_id: string }>(
+        `select external_id from provider_identities where provider = 'twitch' order by external_id`,
+      )
+      expect(identities.map((row) => row.external_id)).toContain(
+        erasedExternalId(pepper, 'twitch', 't-ghost'),
+      )
+
+      const { rows: events } = await db.pool.query<{ event_id: string }>(
+        'select event_id from inbound_events order by event_id',
+      )
+      expect(events.map((row) => row.event_id)).toEqual(['fresh-event'])
+
+      const { rows: audit } = await db.pool.query<{ kind: string }>(
+        `select kind from audit_log where kind like 'retention-%' order by kind`,
+      )
+      expect(audit.map((row) => row.kind)).toEqual(['retention-fresh'])
+
+      const { rows: active } = await db.pool.query<{ erased_at: Date | null }>(
+        `select erased_at from fans where handle = 'active'`,
+      )
+      expect(active[0]?.erased_at).toBeNull()
+    })
+
+    it('reports zeros on a second pass over the same data', async () => {
+      await seedStale()
+
+      expect(await purgeBatch(db.pool, { pepper, dryRun: false })).toEqual({
+        fans: 1,
+        identities: 1,
+        events: 1,
+        audit: 1,
+      })
+      expect(await purgeBatch(db.pool, { pepper, dryRun: false })).toEqual({
+        fans: 0,
+        identities: 0,
+        events: 0,
+        audit: 0,
+      })
+    })
+
+    it('keeps an erased account off the ladder and out of the profile', async () => {
+      const fanId = await seedFan('ashu', 'Ashu')
+      const identityId = await seedIdentity('t-ashu', 'ashu_tv')
+      await link(fanId, identityId)
+      await award(identityId, 'twitch.follow', 'idem-ashu')
+      await db.pool.query(`update fans set created_at = now() - interval '1200 days' where id = $1`, [
+        fanId,
+      ])
+      await seedFan('fresh', 'Fresh')
+
+      expect((await purgeBatch(db.pool, { pepper, dryRun: false })).fans).toBe(1)
+
+      // The erased account kept its row under a random handle. Querying that new handle is
+      // what proves `getFanByHandle` filters on `erased_at` rather than merely missing the
+      // old, now-gone handle.
+      const { rows } = await db.pool.query<{ handle: string }>(
+        'select handle from fans where id = $1',
+        [fanId],
+      )
+      const renamed = rows[0]?.handle ?? ''
+      expect(renamed).toMatch(/^deleted_/)
+
+      const { linked } = await withTransaction(db.pool, (tx) => listLadder(tx))
+      expect(linked).toEqual([{ handle: 'fresh', level: 0, balance: 0 }])
+
+      expect(await withTransaction(db.pool, (tx) => getFanByHandle(tx, 'ashu'))).toBeNull()
+      expect(await withTransaction(db.pool, (tx) => getFanByHandle(tx, renamed))).toBeNull()
+    })
+
+    it('keeps an erased never-linked identity off the free-standing ladder', async () => {
+      const identityId = await seedIdentity('t-ghost', 'ghost')
+      await award(identityId, 'twitch.follow', 'idem-ghost')
+      await db.pool.query(
+        `update provider_identities set created_at = now() - interval '1200 days' where id = $1`,
+        [identityId],
+      )
+
+      const before = await withTransaction(db.pool, (tx) => listLadder(tx))
+      expect(before.freeStanding.map((row) => row.identityId)).toEqual([identityId])
+
+      expect((await purgeBatch(db.pool, { pepper, dryRun: false })).identities).toBe(1)
+
+      // The erasure forfeits the identity's live earns, which alone would hide the row from
+      // the ladder. A later platform event paying the same provider account a fresh earn is
+      // what isolates the `erased:` exclusion under test.
+      await award(identityId, 'twitch.raid', 'idem-ghost-2')
+
+      const after = await withTransaction(db.pool, (tx) => listLadder(tx))
+      expect(after.freeStanding).toEqual([])
+    })
   })
 })

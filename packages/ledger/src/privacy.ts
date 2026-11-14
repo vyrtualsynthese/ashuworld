@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto'
+import type { Pool } from 'pg'
 import type { ProviderName } from '@ashuworld/providers'
-import { requireTransaction, type Queryable } from './db.js'
+import { requireTransaction, withTransaction, type Queryable } from './db.js'
 import { getStanding } from './standing.js'
 
 /** The environment variable the erasure CLI and the sweeper read the pepper from. */
@@ -347,4 +348,170 @@ export async function exportFan(tx: Queryable, handle: string): Promise<FanExpor
       forfeitedAt: entry.forfeited_at,
     })),
   }
+}
+
+/**
+ * How long an untouched account is kept before its personal data is erased.
+ *
+ * Three years: long enough that a fan who steps away for a season still finds their
+ * history, short enough that an abandoned account does not outlive its purpose.
+ */
+export const INACTIVE_FAN_RETENTION_DAYS = 1095
+
+/**
+ * How long a provider account that never joined a fan account is kept.
+ *
+ * Same three years as an inactive fan, because it is the same personal data: a provider
+ * display handle and the id behind it. There is no fan to ask, so the clock starts at the
+ * row's creation rather than at a sign-in that never happened.
+ */
+export const NEVER_LINKED_IDENTITY_RETENTION_DAYS = 1095
+
+/**
+ * How long a processed provider event is kept.
+ *
+ * The payload is the raw webhook body — the most personal thing the ledger stores — and
+ * its only use is a replay within a day or two. Thirty days keeps a fortnight of incident
+ * investigation while the delivery receipts age out quickly.
+ */
+export const PROCESSED_EVENT_RETENTION_DAYS = 30
+
+/** How long the audit trail is kept, counted from the moment the row was written. */
+export const AUDIT_RETENTION_DAYS = 1095
+
+/** What one purge pass removed. Counts only, in the same spirit as the erasure results. */
+export interface PurgeResult {
+  /** Accounts passed through `eraseFan`. */
+  fans: number
+  /** Never-linked identities passed through `eraseIdentity`. */
+  identities: number
+  /** Processed provider events deleted. */
+  events: number
+  /** Audit rows deleted. */
+  audit: number
+}
+
+const MS_PER_DAY = 86_400_000
+
+/** The cutoff for a retention window, derived from the caller's clock rather than the database's. */
+function daysBefore(now: Date, days: number): Date {
+  return new Date(now.getTime() - days * MS_PER_DAY)
+}
+
+// One definition per predicate, so the counting read and the deleting write can never
+// disagree about which rows a pass covers.
+const PROCESSED_EVENT_PURGE = 'processed_at is not null and received_at < $1'
+const AUDIT_PURGE = 'created_at < $1'
+
+async function countRows(tx: Queryable, sql: string, values: unknown[]): Promise<number> {
+  const { rows } = await tx.query<{ count: number }>(sql, values)
+  return rows[0]?.count ?? 0
+}
+
+/**
+ * One retention pass: delete what is past its window, erase what belongs to nobody.
+ *
+ * A single transaction, so a pass either moves every row it reports or none of them. The
+ * caller gets counts, and running the same pass twice is safe: the first one marks the
+ * fans erased, hashes the identities and deletes the events and audit rows, and the
+ * second selects nothing.
+ *
+ * The clock is a bound parameter (`input.now`, defaulting to the process clock) and never
+ * SQL `now()`, so a retention window is decided once, in one place, and a test can move
+ * the date without waiting three years.
+ *
+ * Order matters for one reason: audit rows are deleted before the erasures run, so the
+ * `erase` rows this pass writes are fresh and survive to describe what happened. Erasing
+ * first and pruning afterwards would delete the record of the work in the same pass that
+ * did it.
+ *
+ * `dryRun` runs the same selections and the same counts but calls neither `eraseFan` nor
+ * `eraseIdentity` and deletes nothing, which is what makes it usable as a preview against
+ * production.
+ *
+ * `limit` caps each of the two erasure passes separately (not the deletions, which are one
+ * statement each): a first run on a large backlog stays bounded, and the next pass picks
+ * up where this one stopped because the rows it handled no longer match.
+ */
+export async function purgeBatch(
+  pool: Pool,
+  input: { pepper: string; dryRun: boolean; now?: Date; limit?: number },
+): Promise<PurgeResult> {
+  const now = input.now ?? new Date()
+  const limit = input.limit ?? 100
+  const eventCutoff = daysBefore(now, PROCESSED_EVENT_RETENTION_DAYS)
+  const auditCutoff = daysBefore(now, AUDIT_RETENTION_DAYS)
+  const fanCutoff = daysBefore(now, INACTIVE_FAN_RETENTION_DAYS)
+  const identityCutoff = daysBefore(now, NEVER_LINKED_IDENTITY_RETENTION_DAYS)
+
+  return withTransaction(pool, async (tx) => {
+    const events = input.dryRun
+      ? await countRows(
+          tx,
+          `select count(*)::int as count from inbound_events where ${PROCESSED_EVENT_PURGE}`,
+          [eventCutoff],
+        )
+      : (
+          await tx.query<{ id: string }>(
+            `delete from inbound_events where ${PROCESSED_EVENT_PURGE} returning id`,
+            [eventCutoff],
+          )
+        ).rows.length
+
+    const audit = input.dryRun
+      ? await countRows(
+          tx,
+          `select count(*)::int as count from audit_log where ${AUDIT_PURGE}`,
+          [auditCutoff],
+        )
+      : (
+          await tx.query<{ id: string }>(`delete from audit_log where ${AUDIT_PURGE} returning id`, [
+            auditCutoff,
+          ])
+        ).rows.length
+
+    // `coalesce(last_seen_at, created_at)` is the same activity signal the partial index
+    // `fans_inactive` covers: the last sign-in, or creation for an account never seen
+    // since. An erased account is never a candidate, and the index skips it.
+    const inactive = await tx.query<{ id: string }>(
+      `select id
+         from fans
+        where erased_at is null
+          and coalesce(last_seen_at, created_at) < $1
+        order by coalesce(last_seen_at, created_at), id
+        limit $2::int`,
+      [fanCutoff, limit],
+    )
+
+    // `fan_id is null` mirrors the free-standing rule. An attached identity is erased
+    // through its fan, and `eraseIdentity` refuses one; without this guard a single
+    // inconsistent row would abort the whole pass.
+    const neverLinked = await tx.query<{ id: string }>(
+      `select id
+         from provider_identities
+        where fan_id is null
+          and first_linked_at is null
+          and external_id not like 'erased:%'
+          and created_at < $1
+        order by created_at, id
+        limit $2::int`,
+      [identityCutoff, limit],
+    )
+
+    if (!input.dryRun) {
+      for (const fan of inactive.rows) {
+        await eraseFan(tx, { fanId: fan.id, pepper: input.pepper })
+      }
+      for (const identity of neverLinked.rows) {
+        await eraseIdentity(tx, { identityId: identity.id, pepper: input.pepper })
+      }
+    }
+
+    return {
+      fans: inactive.rows.length,
+      identities: neverLinked.rows.length,
+      events,
+      audit,
+    }
+  })
 }
