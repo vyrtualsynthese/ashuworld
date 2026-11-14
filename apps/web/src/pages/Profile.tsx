@@ -27,6 +27,10 @@ function ProfileBody({ fan }: { fan: PublicFan }) {
           <dd>{formatNumber(fan.peakXp)}</dd>
         </div>
       </dl>
+      <p className="muted">
+        Peak XP is the highest balance this fan has ever reached, which is why the level
+        survives a punishment or a detach.
+      </p>
 
       <section aria-labelledby="providers-heading">
         <h2 id="providers-heading">Attached accounts</h2>
@@ -53,8 +57,9 @@ function ProfileBody({ fan }: { fan: PublicFan }) {
  *
  * An unknown handle is a page, not an error. The api answers 404 with the same body as a
  * route that does not exist, so anything else shown here would turn a mistyped link into a
- * crash or a hint about who has an account. The 404 branch is why `ApiError` carries the
- * status: the page decides, not a string match on a message.
+ * crash or a hint about who has an account. Any other 4xx means the same thing for this
+ * page: the api refused this profile, and there is no fan to show. Only a 5xx or a request
+ * that never reached the server is a server failure worth a retry.
  */
 export function Profile() {
   const { handle = '' } = useParams<{ handle: string }>()
@@ -69,22 +74,23 @@ export function Profile() {
     )
   }
 
-  if (resource.state === 'error' && resource.error instanceof ApiError && resource.error.status === 404) {
-    return (
-      <main className="page">
-        <h1>No such fan</h1>
-        <p>
-          There is no fan called @{handle} on AshuWorld. The handle may be misspelled, or
-          this fan may not have joined yet.
-        </p>
-        <Link className="button" to="/ladder">
-          Back to the ladder
-        </Link>
-      </main>
-    )
-  }
-
   if (resource.state === 'error') {
+    const status = resource.error instanceof ApiError ? resource.error.status : 0
+    if (status >= 400 && status < 500) {
+      return (
+        <main className="page">
+          <h1>No such fan</h1>
+          <p>
+            There is no fan called @{handle} on AshuWorld. The handle may be misspelled, or
+            this fan may not have joined yet.
+          </p>
+          <Link className="button" to="/ladder">
+            Back to the ladder
+          </Link>
+        </main>
+      )
+    }
+
     return (
       <main className="page">
         <h1>Profile</h1>

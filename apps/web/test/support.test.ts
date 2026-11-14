@@ -29,10 +29,11 @@ describe('providers', () => {
     expect(isProviderName('<script>')).toBe(false)
   })
 
-  it('labels the known providers and passes an unknown one through only for display', () => {
+  it('labels the known providers and gives an unknown one a neutral label', () => {
     expect(providerLabel('youtube')).toBe('YouTube')
     expect(providerLabel('twitch')).toBe('Twitch')
-    expect(providerLabel('mystery')).toBe('mystery')
+    expect(providerLabel('mystery')).toBe('Unknown provider')
+    expect(providerLabel('<script>')).toBe('Unknown provider')
   })
 })
 

@@ -27,5 +27,5 @@ export function isProviderName(value: string): value is ProviderName {
 
 /** A label for a provider that came from the api or from a URL. */
 export function providerLabel(provider: string): string {
-  return isProviderName(provider) ? LABELS[provider] : provider
+  return isProviderName(provider) ? LABELS[provider] : 'Unknown provider'
 }

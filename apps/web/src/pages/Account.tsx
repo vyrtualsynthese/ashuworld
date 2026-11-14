@@ -90,8 +90,8 @@ function ReattachPanel({ provider }: { provider: string }) {
       <h2 id="reattach-heading">Your {label} account is detached</h2>
       <p>
         You signed in with {label}, but that account is not attached to your AshuWorld
-        account. Signing in does not put it back on its own: a sign-in only proves who you
-        are, and reconnecting an account changes which XP counts towards your balance.
+        account. You can attach it again later as a fresh, empty account; the forfeit is
+        permanent.
       </p>
       <p>
         To attach it again, start a fresh {label} sign-in that asks to link the account.
@@ -111,8 +111,8 @@ function NoticePanel({ notice }: { notice: Notice }) {
           <p>
             Your {providerLabel(notice.provider)} account @{notice.displayHandle} is
             detached. {forfeitSentence(notice.forfeitedEntries)}, and your XP to spend is
-            now {formatNumber(notice.balance)}. Your level is still {notice.level}. To
-            attach it again, sign in with {providerLabel(notice.provider)} once more.
+            now {formatNumber(notice.balance)}. Your level is still {notice.level}. You can
+            attach it again later as a fresh, empty account; the forfeit is permanent.
           </p>
         </div>
       )
@@ -168,8 +168,8 @@ function DetachConfirm({ identity, busy, onConfirm, onCancel }: DetachConfirmPro
       </h2>
       <p>
         This cannot be undone. The XP this account earned is forfeited for good: it leaves
-        your balance and signing in again will not bring it back. Your level and your peak
-        XP stay where they are.
+        your balance, and attaching this account again later will not bring the XP back.
+        Your level and your peak XP stay where they are.
       </p>
       <div className="actions">
         <button type="button" onClick={onConfirm} disabled={busy}>
@@ -316,7 +316,10 @@ export function Account() {
             </button>
           </header>
 
-          {reattach !== null && <ReattachPanel provider={reattach} />}
+          {reattach !== null &&
+            !resource.data.identities.some((identity) => identity.provider === reattach) && (
+              <ReattachPanel provider={reattach} />
+            )}
 
           <dl className="standing">
             <div>
