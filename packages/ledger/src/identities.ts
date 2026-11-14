@@ -1,5 +1,5 @@
 import type { GameConfig } from '@ashuworld/gameconfig'
-import { isUniqueViolation, type Queryable } from './db.js'
+import { isUniqueViolation, requireTransaction, type Queryable } from './db.js'
 import { recomputeStanding } from './standing.js'
 
 /** What a link attempt did, or why it did nothing. */
@@ -15,26 +15,6 @@ export interface IdentityChangeInput {
   fanId: string
   identityId: string
   cfg: GameConfig
-}
-
-/**
- * Refuses a caller that passed a bare pool instead of an open transaction.
- *
- * Both account changes depend on statement lifetime: a `for update` lock is held until the
- * transaction ends, and the savepoint that turns a unique violation back into a refusal
- * only exists inside one. On a bare pool each statement autocommits on whichever
- * connection the pool hands out — so `detachIdentity` would release its fan lock before
- * the count is even decided, and two concurrent detaches could each unlink one of the
- * fan's two identities, leaving the zero-identity account the rule forbids. A failure
- * halfway through would also leave the forfeit committed without the unlink.
- *
- * Postgres rejects `savepoint` outside a transaction block ("SAVEPOINT can only be used in
- * transaction blocks"), so this pair is the cheapest enforcement the database offers. It
- * costs two round trips inside a real transaction.
- */
-async function requireTransaction(tx: Queryable): Promise<void> {
-  await tx.query('savepoint ledger_tx_required')
-  await tx.query('release savepoint ledger_tx_required')
 }
 
 /**
@@ -60,8 +40,8 @@ async function requireTransaction(tx: Queryable): Promise<void> {
  * transaction usable, instead of surfacing a raw unique violation.
  *
  * The first statements are a savepoint pair that exists only to refuse a bare pool. See
- * `requireTransaction` below: documentation alone is not enough, because the damage from
- * running outside a transaction is silent.
+ * `requireTransaction` in `db.ts`: documentation alone is not enough, because the damage
+ * from running outside a transaction is silent.
  */
 export async function linkIdentity(
   tx: Queryable,
