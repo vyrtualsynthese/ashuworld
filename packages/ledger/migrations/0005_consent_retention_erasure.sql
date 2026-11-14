@@ -1,8 +1,9 @@
 -- Consent and activity, kept on the fan row.
 --
 -- `terms_version` remembers which terms the fan agreed to and `terms_accepted_at` when
--- that happened; both are written once, at the first acceptance, because later terms
--- versions are a new acceptance to record, not a correction of the old one.
+-- that happened; both are written once, at the first acceptance, and kept forever. A later
+-- version is not recorded, so changing the terms means a deliberate migration of these
+-- columns, not something a sign-in does.
 -- `last_seen_at` is the activity signal that retention uses: an account nobody has signed
 -- into for long enough becomes a candidate for deletion. `erased_at` marks an account whose
 -- personal data was erased; the row survives in that state so its history stops pointing at
@@ -12,6 +13,9 @@ alter table fans
   add column terms_accepted_at timestamptz,
   add column last_seen_at timestamptz,
   add column erased_at timestamptz;
+
+-- The pair moves together: an acceptance is a version and a moment, never one alone.
+alter table fans add constraint fans_terms_pair check ((terms_version is null) = (terms_accepted_at is null));
 
 -- The consent shown while a sign-in is in flight. A login can only record an acceptance
 -- it actually carried from the start page, and a link has none: the column is filled at

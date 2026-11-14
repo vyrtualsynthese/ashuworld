@@ -219,7 +219,7 @@ jobs:
             -e DATABASE_URL=postgres://ashu:ashu@127.0.0.1:5432/ashu \
             "$IMAGE_PREFIX/api:$GITHUB_SHA" node dist/migrate.js)"
           echo "$out"
-          grep -q '4 migration file(s) found' <<<"$out"
+          grep -q '5 migration file(s) found' <<<"$out"
           # A second run applies nothing: the bookkeeping table is the idempotence proof.
           again="$(docker run --rm --network host \
             -e DATABASE_URL=postgres://ashu:ashu@127.0.0.1:5432/ashu \
@@ -233,6 +233,7 @@ jobs:
           docker run -d --name api --network host --read-only \
             -e DATABASE_URL=postgres://ashu:ashu@127.0.0.1:5432/ashu \
             -e PUBLIC_BASE_URL=http://localhost:3000 \
+            -e ERASURE_PEPPER=ci-pepper \
             "$IMAGE_PREFIX/api:$GITHUB_SHA"
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:3000/api/health > /tmp/health.json; then break; fi

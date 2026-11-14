@@ -5,10 +5,11 @@ import type { Queryable } from './db.js'
  *
  * The `terms_accepted_at is null` guard is what makes the acceptance immutable: consent is
  * evidence of what the fan agreed to at a moment in time, so a later sign-in with a
- * different version must not rewrite it. Keeping the first acceptance also keeps the
- * record honest — if the terms change, the fan is asked again and the new acceptance is a
- * separate fact to store, not an edit of the old one. A second call is a silent no-op: the
- * caller has nothing to repair, since the fan already consented.
+ * different version must not rewrite it. The first acceptance is kept forever and a later
+ * version is not recorded at all, so the stored version is the one the fan first agreed to,
+ * not necessarily today's document: changing the terms means a deliberate migration of
+ * these columns, not something a sign-in does. A second call is a silent no-op: the caller
+ * has nothing to repair, since the fan already consented.
  *
  * The timestamp comes from the database clock, not from the process. Two api instances with
  * skewed clocks would otherwise disagree about when the same fan accepted, and the stored

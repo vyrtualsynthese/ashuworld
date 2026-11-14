@@ -433,9 +433,22 @@ describe('Account, signed out', () => {
 
     await userEvent.click(consent)
 
+    expect(consent).toBeChecked()
     expect(
       screen.getByRole('link', { name: /se connecter avec le compte de développement/i }),
     ).toHaveAttribute('href', '/auth/dev/start?purpose=login&accept=2026-11-14')
+
+    await userEvent.click(consent)
+
+    // Unticking takes the href away again: the gate follows the box's current state
+    // rather than unlocking permanently on the first tick.
+    expect(consent).not.toBeChecked()
+    expect(
+      screen.queryByRole('link', { name: /se connecter avec le compte de développement/i }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /se connecter avec le compte de développement/i }),
+    ).toBeDisabled()
   })
 
   it('says sign-in is not switched on, and offers no link, when the dev door is off', async () => {

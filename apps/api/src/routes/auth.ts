@@ -368,6 +368,14 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         return reply.code(400).send(errorBody('handshake_invalid', HANDSHAKE_INVALID))
       }
 
+      // A login handshake issued before the consent gate carried no version. Creating a
+      // fan from it would record an account nobody accepted the terms for, so it is sent
+      // back to the start page to tick the box rather than completed. Checked before the
+      // exchange: a refused callback has no reason to spend the provider's code.
+      if (handshake.purpose === 'login' && handshake.termsVersion === null) {
+        return reply.code(400).send(errorBody('consent_required', CONSENT_REQUIRED))
+      }
+
       let profile: IdentityProfile
       try {
         profile = await provider.exchange({
