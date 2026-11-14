@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/vyrtualsynthese/ashuworld/security/advisories/new
+    about: Report a vulnerability privately. Never in a public issue.
+  - name: Question or idea about the game design
+    url: https://github.com/vyrtualsynthese/ashuworld/discussions
+    about: For open-ended conversation about the rules, the curve, or the rewards.
