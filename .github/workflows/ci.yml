@@ -3,11 +3,15 @@ name: CI
 on:
   push:
     branches: [develop]
+    tags: ['v*']
   pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   verify:
@@ -50,3 +54,170 @@ jobs:
       - run: pnpm lint
 
       - run: pnpm test:coverage
+
+  helm:
+    name: helm
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned rather than a setup action's default: the chart is checked with the same
+      # Helm the operator runs, so a rendering difference shows up here and not on the
+      # cluster. The tarball layout is the one get.helm.sh has used for both major versions.
+      - name: Install Helm
+        run: |
+          curl -fsSL https://get.helm.sh/helm-v4.2.4-linux-amd64.tar.gz | tar -xz -C /tmp
+          sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
+          helm version --short
+
+      - name: Lint the chart
+        run: helm lint deploy/helm/ashuworld
+
+      # The render script asserts what the chart promises: three Deployments, the gated
+      # routes, the migration hook, hardened containers and no connection string in a
+      # manifest. It is the executable version of the chart's contract.
+      - name: Render the chart and assert its promises
+        run: bash deploy/helm/ashuworld/test/render.sh
+
+  images:
+    name: images
+    # Images are published from develop and from release tags, after the tree is green.
+    if: github.event_name == 'push'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GHCR requires a lowercase repository name; `github.repository` keeps the account's
+      # capitalisation.
+      - name: Resolve the image prefix
+        run: echo "IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      # Every image carries the commit SHA, which is what a deployment pins. `latest` is
+      # also pushed because values.yaml defaults to it, so a plain `helm install` without
+      # --set image.tag runs the newest develop build instead of failing to pull.
+      - name: Build and push api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/api.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/api:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/api:latest
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build and push web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/web.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/web:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/web:latest
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+      - name: Build and push worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/worker.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/worker:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/worker:latest
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,scope=worker,mode=max
+
+  # The smoke test the plan requires: the api image, its migrate entry point and its health
+  # route, against the same Postgres service container the tests use. It runs after the
+  # images job so a broken image is caught before it is deployed, not after.
+  smoke:
+    name: image smoke
+    if: github.event_name == 'push'
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      packages: read
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ashu
+          POSTGRES_PASSWORD: ashu
+          POSTGRES_DB: ashu
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve the image prefix
+        run: echo "IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      # `--network host` is what lets the container reach the service container on
+      # 127.0.0.1:5432, the same address the test suite uses.
+      - name: The image finds its migrations and applies them
+        run: |
+          docker pull "$IMAGE_PREFIX/api:$GITHUB_SHA"
+          out="$(docker run --rm --network host \
+            -e DATABASE_URL=postgres://ashu:ashu@127.0.0.1:5432/ashu \
+            "$IMAGE_PREFIX/api:$GITHUB_SHA" node dist/migrate.js)"
+          echo "$out"
+          grep -q '4 migration file(s) found' <<<"$out"
+          # A second run applies nothing: the bookkeeping table is the idempotence proof.
+          again="$(docker run --rm --network host \
+            -e DATABASE_URL=postgres://ashu:ashu@127.0.0.1:5432/ashu \
+            "$IMAGE_PREFIX/api:$GITHUB_SHA" node dist/migrate.js)"
+          echo "$again"
+          grep -q 'applied 0 migration' <<<"$again"
+
+      - name: The api answers its health route from a read-only filesystem
+        run: |
+          docker run -d --name api --network host --read-only \
+            -e DATABASE_URL=postgres://ashu:ashu@127.0.0.1:5432/ashu \
+            -e PUBLIC_BASE_URL=http://localhost:3000 \
+            "$IMAGE_PREFIX/api:$GITHUB_SHA"
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/health.json; then break; fi
+            sleep 1
+          done
+          cat /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
+          docker rm -f api

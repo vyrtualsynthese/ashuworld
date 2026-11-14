@@ -1,0 +1,72 @@
+# The one origin the browser sees: the pages, the api and the auth callback.
+#
+# ${API_UPSTREAM} is substituted once, at container start, by nginx's entrypoint. The nginx
+# variables below (`$host`, `$uri`, ...) are left alone by that step: it only replaces the
+# names of environment variables that are actually set, and none of them are lowercase.
+#
+# The order of the location blocks is what keeps the SPA fallback honest. nginx picks the
+# longest matching prefix, but a `/api` request never reaches `location /`, so a missing api
+# route answers the api's JSON 404 rather than an HTML page the browser would try to parse as
+# JSON.
+
+server {
+  listen 8080;
+  server_name _;
+
+  root /usr/share/nginx/html;
+  index index.html;
+
+  # Never proxy to an upstream that a caller can influence, and keep the Host the client
+  # asked for: the api derives link and callback URLs from it.
+  proxy_http_version 1.1;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header Connection "";
+  proxy_connect_timeout 5s;
+  proxy_send_timeout 30s;
+  proxy_read_timeout 30s;
+
+  # The api. In the cluster the ingress sends /api straight to the api Service; this block is
+  # what makes the image work behind a single proxy (a bare `docker run`, or a host reverse
+  # proxy that only knows about the web container), and it is why the session cookie stays
+  # first-party in either topology.
+  location /api {
+    proxy_pass ${API_UPSTREAM};
+  }
+
+  # The OAuth callbacks and the session endpoints. Same upstream, separate prefix so the
+  # intent is readable in a config dump.
+  location /auth {
+    proxy_pass ${API_UPSTREAM};
+  }
+
+  # The hook receiver belongs to the worker, and the ingress is what routes it there. Until a
+  # real adapter binds a port, the web container answers 404 by name: without this block a
+  # misrouted webhook would get the index page and the provider would treat it as delivered.
+  location /hooks {
+    return 404;
+  }
+
+  # Vite writes content-hashed file names under /assets, so they are safe to cache forever.
+  # A missing one is a 404, never index.html: a stale page asking for a removed chunk must
+  # fail loudly rather than load HTML as JavaScript.
+  location /assets/ {
+    try_files $uri =404;
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+  }
+
+  # The document itself is never cached: a deploy must be visible on the next request.
+  location = /index.html {
+    add_header Cache-Control "no-store";
+  }
+
+  # The client-side routes. React Router owns /, /ladder, /f/<handle> and /account, and a
+  # reload on any of them must return the document rather than a 404. This block is last and
+  # only matches what the prefixes above did not.
+  location / {
+    try_files $uri /index.html;
+  }
+}

@@ -1,0 +1,60 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ashuworld.fullname" . }}
+  labels:
+    {{- include "ashuworld.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName | default (printf "%s-tls" (include "ashuworld.fullname" .)) | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          # Longest prefix wins, so the order here is for the reader. The two api prefixes
+          # come before the catch-all so nothing can be answered by the web pod by mistake.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ashuworld.apiServiceName" . }}
+                port:
+                  name: http
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ashuworld.apiServiceName" . }}
+                port:
+                  name: http
+          {{- if .Values.hooks.enabled }}
+          # Gated: the worker binds no HTTP port until a real adapter exists, and a route to
+          # a Service that is not listening fails every request a provider sends.
+          - path: /hooks
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ashuworld.fullname" . }}-worker
+                port:
+                  name: http
+          {{- end }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ashuworld.fullname" . }}-web
+                port:
+                  name: http
+{{- end }}
