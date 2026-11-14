@@ -1,6 +1,6 @@
 # Platform keys, sign-in and the unlinked ladder
 
-**Status:** proposed, awaiting approval.
+**Status:** approved, 2026-11-14.
 **Date:** 2026-11-14.
 **Depends on:** the foundation design and plan (`2026-11-14-ashuworld-fan-xp-design.md`,
 `2026-11-14-ashuworld-foundation.md`), which this extends without changing its rules.
