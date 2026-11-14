@@ -94,10 +94,11 @@ docker/{api,web,worker}.Dockerfile
 ### Task 1: Monorepo skeleton
 
 **Files:**
-- Create: `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `eslint.config.js`, `.gitignore`, `vitest.workspace.ts`, `vitest.config.ts`
-- Create: `apps/api/package.json`, `apps/web/package.json`, `apps/worker/package.json`, `packages/ledger/package.json`, `packages/gameconfig/package.json`, `packages/providers/package.json` (each `"private": true`, name `@ashuworld/<dir>`)
-- Create: `packages/providers/src/index.ts`, `packages/providers/test/providers.test.ts`
+- Create: `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `tsconfig.json`, `eslint.config.js`, `.gitignore`, `vitest.workspace.ts`, `vitest.config.ts`
+- Create: `packages/providers/package.json`, `packages/providers/tsconfig.json`, `packages/providers/src/index.ts`
+- Create: `packages/providers/test/providers.test.ts`
 - Create: `.github/workflows/ci.yml`
+- Note: every other package and app is created by the task that fills it (Task 2 gameconfig, 3 ledger, 8 api, 13 web, 14 worker). An empty stub cannot meet the 80% coverage floor, and the floor is not negotiable.
 
 **Interfaces:**
 - Produces: workspace package names `@ashuworld/api`, `@ashuworld/web`, `@ashuworld/worker`, `@ashuworld/ledger`, `@ashuworld/gameconfig`, `@ashuworld/providers`; root scripts `typecheck`, `lint`, `test`, `build`.
@@ -186,7 +187,7 @@ git commit -m "🔧 chore: pnpm workspace skeleton with providers package"
 ### Task 2: Game config — actions and level table
 
 **Files:**
-- Create: `packages/gameconfig/src/index.ts`, `src/actions.ts`, `src/levels.ts`, `config/game.json`
+- Create: `packages/gameconfig/package.json`, `packages/gameconfig/tsconfig.json`, `packages/gameconfig/src/index.ts`, `src/actions.ts`, `src/levels.ts`, `config/game.json`
 - Test: `packages/gameconfig/test/gameconfig.test.ts`
 
 **Interfaces:**
@@ -260,7 +261,7 @@ git add packages/gameconfig && git commit -m "✨ feat: versioned game config wi
 ### Task 3: Ledger schema, migration runner, test database
 
 **Files:**
-- Create: `packages/ledger/migrations/0001_init.sql`, `src/migrate.ts`, `src/db.ts`, `src/index.ts`
+- Create: `packages/ledger/package.json`, `packages/ledger/tsconfig.json`, `packages/ledger/migrations/0001_init.sql`, `src/migrate.ts`, `src/db.ts`, `src/index.ts`
 - Test: `packages/ledger/test/schema.test.ts`, `test/helpers/db.ts`
 - Create: `packages/ledger/vitest.config.ts` (reads `TEST_DATABASE_URL`)
 
@@ -674,7 +675,7 @@ git add packages/ledger && git commit -m "✨ feat: penalties that never cost a 
 ### Task 8: API skeleton
 
 **Files:**
-- Create: `apps/api/src/server.ts`, `src/index.ts`, `src/config.ts`, `src/routes/health.ts`
+- Create: `apps/api/package.json`, `apps/api/tsconfig.json`, `apps/api/src/server.ts`, `src/index.ts`, `src/config.ts`, `src/routes/health.ts`
 - Test: `apps/api/test/server.test.ts`
 
 **Interfaces:**
@@ -693,6 +694,11 @@ it('serves health', async () => {
 
 it('refuses to start without DATABASE_URL', () => {
   expect(() => loadEnv({})).toThrow(/DATABASE_URL/)
+})
+
+it('maps a ledger validation error to 400 and hides an unknown error', async () => {
+  // a route that throws PenaltyError -> 400 with its code
+  // a route that throws Error('secret detail') -> 500 { code: 'internal' }, no 'secret detail'
 })
 ```
 
@@ -966,7 +972,7 @@ git add packages/ledger apps/api && git commit -m "✨ feat: public profile and 
 ### Task 13: Web app
 
 **Files:**
-- Create: `apps/web/index.html`, `vite.config.ts`, `src/main.tsx`, `src/App.tsx`, `src/api.ts`, `src/pages/Home.tsx`, `src/pages/Ladder.tsx`, `src/pages/Profile.tsx`, `src/pages/Account.tsx`
+- Create: `apps/web/package.json`, `apps/web/tsconfig.json`, `apps/web/index.html`, `vite.config.ts`, `src/main.tsx`, `src/App.tsx`, `src/api.ts`, `src/pages/Home.tsx`, `src/pages/Ladder.tsx`, `src/pages/Profile.tsx`, `src/pages/Account.tsx`
 - Test: `apps/web/test/pages.test.tsx`
 
 **Interfaces:**
@@ -1015,7 +1021,7 @@ git add apps/web && git commit -m "✨ feat: web app with ladder, profile and ac
 ### Task 14: Worker and the outbox loop
 
 **Files:**
-- Create: `apps/worker/src/index.ts`, `src/loop.ts`, `src/processors.ts`
+- Create: `apps/worker/package.json`, `apps/worker/tsconfig.json`, `apps/worker/src/index.ts`, `src/loop.ts`, `src/processors.ts`
 - Test: `apps/worker/test/loop.test.ts`
 
 **Interfaces:**
@@ -1095,7 +1101,7 @@ Expected: FAIL — no chart.
 
 - [ ] **Step 3: Implement**
 
-Multi-stage Dockerfiles: `pnpm deploy --filter @ashuworld/api --prod` into a `node:22-slim` image running as uid 10001, non-root, `NODE_ENV=production`. The web image is a Vite build served by `nginx:alpine` with a SPA fallback and `/api` proxy to the api Service so the single-origin constraint holds in-cluster too. Ingress paths: `/` → web, `/api` and `/auth` → api, `/hooks` → worker. Every container gets `readOnlyRootFilesystem`, a writable `emptyDir` only where required, and resource requests.
+Multi-stage Dockerfiles: an `esbuild` bundle per app (workspace packages export TypeScript source, so the bundle is the build step — no runtime TypeScript), then a `node:22-slim` image running the bundle as uid 10001, non-root, `NODE_ENV=production`, `node dist/server.js`. The web image is a Vite build served by `nginx:alpine` with a SPA fallback and `/api` proxy to the api Service so the single-origin constraint holds in-cluster too. Ingress paths: `/` → web, `/api` and `/auth` → api, `/hooks` → worker. Every container gets `readOnlyRootFilesystem`, a writable `emptyDir` only where required, and resource requests.
 
 - [ ] **Step 4: Run the checks**
 
