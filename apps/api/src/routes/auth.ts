@@ -428,12 +428,15 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         return reply.code(400).send(errorBody('consent_required', CONSENT_REQUIRED))
       }
 
+      // `verifiedActions` is deliberately ignored here: this task wires the provider in,
+      // and the callback that turns a verified action into a ledger entry comes later.
       let profile: IdentityProfile
       try {
-        profile = await provider.exchange({
+        const result = await provider.exchange({
           code,
           redirectUri: callbackUri(deps.env, provider.name),
         })
+        profile = result.profile
       } catch (error) {
         if (!(error instanceof ProviderExchangeError)) throw error
         return reply.code(error.httpStatus).send(errorBody('provider_error', error.message))
