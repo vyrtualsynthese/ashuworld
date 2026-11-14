@@ -76,7 +76,11 @@ export const ME = {
 
 /** The public ladder with one linked fan and one never-linked account. */
 export const LADDER = {
-  linked: [{ fanId: 'fan-1', handle: 'ashu', level: 2, balance: 320 }],
+  linked: [
+    { fanId: 'fan-1', handle: 'ashu', level: 2, balance: 320 },
+    // A negative balance is legal in the ledger and must still render as a number.
+    { fanId: 'fan-2', handle: 'dave', level: 1, balance: -40 },
+  ],
   freeStanding: [
     { identityId: 'identity-1', provider: 'twitch', displayHandle: 'sofa_sam', xp: 45 },
   ],
