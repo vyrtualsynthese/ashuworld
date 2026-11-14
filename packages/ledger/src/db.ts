@@ -38,6 +38,21 @@ function asQueryable(client: pg.PoolClient): Queryable {
 }
 
 /**
+ * True when Postgres refused the write because the unique constraint `constraint` already
+ * holds that key. The constraint name is part of the test on purpose: `23505` alone also
+ * covers every other unique index on the table, and a caller that treated those as "this
+ * key is taken" would report the wrong reason without ever failing.
+ *
+ * The error is read structurally rather than imported from `pg`: the ledger's `Queryable`
+ * is not necessarily a pg client, and only these two fields matter.
+ */
+export function isUniqueViolation(error: unknown, constraint: string): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const { code, constraint: refused } = error as { code?: unknown; constraint?: unknown }
+  return code === '23505' && refused === constraint
+}
+
+/**
  * Runs `fn` inside `begin`/`commit`, rolling back if it throws and always returning the
  * connection to the pool. A connection whose rollback fails is destroyed instead of
  * being handed to the next caller in an unknown transaction state.
