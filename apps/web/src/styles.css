@@ -229,7 +229,6 @@ a:focus-visible {
   letter-spacing: 0.06em;
 }
 
-.free-list,
 .identity-list,
 .attach-list {
   display: grid;
@@ -239,7 +238,6 @@ a:focus-visible {
   list-style: none;
 }
 
-.free-list li,
 .identity-list li {
   display: flex;
   flex-wrap: wrap;
@@ -257,15 +255,6 @@ a:focus-visible {
 
 .provider {
   font-weight: 600;
-}
-
-.xp {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-}
-
-.unit {
-  color: var(--muted);
 }
 
 @media (prefers-reduced-motion: no-preference) {

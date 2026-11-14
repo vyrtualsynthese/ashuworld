@@ -19,23 +19,23 @@ function ProfileBody({ fan }: { fan: PublicFan }) {
 
       <dl className="standing">
         <div>
-          <dt>XP to spend</dt>
+          <dt>XP</dt>
           <dd>{formatNumber(fan.balance)}</dd>
         </div>
         <div>
-          <dt>Peak XP</dt>
+          <dt>XP maximal</dt>
           <dd>{formatNumber(fan.peakXp)}</dd>
         </div>
       </dl>
       <p className="muted">
-        Peak XP is the highest balance this fan has ever reached, which is why the level
-        survives a punishment or a detach.
+        L’XP maximal est le plus haut total jamais atteint par ce Dachi : c’est pour cela
+        que le niveau survit à une sanction ou à un détachement.
       </p>
 
       <section aria-labelledby="providers-heading">
-        <h2 id="providers-heading">Attached accounts</h2>
+        <h2 id="providers-heading">Comptes rattachés</h2>
         {fan.identities.length === 0 ? (
-          <p className="muted">No provider account is attached to this fan account.</p>
+          <p className="muted">Aucun compte de plateforme n’est rattaché à ce Dachi.</p>
         ) : (
           <ul className="identity-list">
             {fan.identities.map((identity) => (
@@ -52,14 +52,14 @@ function ProfileBody({ fan }: { fan: PublicFan }) {
 }
 
 /**
- * A public profile: the level, what the fan can spend, what they reached, and the accounts
- * behind the total.
+ * A public profile: the level, the XP kept now, the most it ever reached, and the
+ * accounts behind the total.
  *
  * An unknown handle is a page, not an error. The api answers 404 with the same body as a
  * route that does not exist, so anything else shown here would turn a mistyped link into a
  * crash or a hint about who has an account. Any other 4xx means the same thing for this
- * page: the api refused this profile, and there is no fan to show. Only a 5xx or a request
- * that never reached the server is a server failure worth a retry.
+ * page: the api refused this profile, and there is no Dachi to show. Only a 5xx or a
+ * request that never reached the server is a server failure worth a retry.
  */
 export function Profile() {
   const { handle = '' } = useParams<{ handle: string }>()
@@ -68,8 +68,8 @@ export function Profile() {
   if (resource.state === 'loading') {
     return (
       <main className="page">
-        <h1>Profile</h1>
-        <p className="muted">Loading this fan…</p>
+        <h1>Profil</h1>
+        <p className="muted">Chargement de ce Dachi…</p>
       </main>
     )
   }
@@ -79,13 +79,13 @@ export function Profile() {
     if (status >= 400 && status < 500) {
       return (
         <main className="page">
-          <h1>No such fan</h1>
+          <h1>Aucun Dachi à ce nom</h1>
           <p>
-            There is no fan called @{handle} on AshuWorld. The handle may be misspelled, or
-            this fan may not have joined yet.
+            Il n’y a pas de Dachi @{handle} sur AshuWorld. Le pseudo est peut-être mal
+            orthographié, ou ce Dachi ne s’est pas encore inscrit.
           </p>
           <Link className="button" to="/ladder">
-            Back to the ladder
+            Retour au classement
           </Link>
         </main>
       )
@@ -93,12 +93,15 @@ export function Profile() {
 
     return (
       <main className="page">
-        <h1>Profile</h1>
+        <h1>Profil</h1>
         <section className="panel panel-error" aria-labelledby="profile-error-heading">
-          <h2 id="profile-error-heading">This profile could not be loaded</h2>
-          <p>The server did not answer, so there is nothing to show for @{handle} yet.</p>
+          <h2 id="profile-error-heading">Ce profil n’a pas pu être chargé</h2>
+          <p>
+            Le serveur n’a pas répondu, il n’y a rien à afficher pour @{handle} pour
+            l’instant.
+          </p>
           <button type="button" onClick={reload}>
-            Try again
+            Réessayer
           </button>
         </section>
       </main>

@@ -10,10 +10,10 @@ import { Link } from 'react-router-dom'
 export function NotFound() {
   return (
     <main className="page">
-      <h1>Page not found</h1>
-      <p>The address you followed does not lead to a page on AshuWorld.</p>
+      <h1>Page introuvable</h1>
+      <p>L’adresse que tu as suivie ne mène à aucune page d’AshuWorld.</p>
       <Link className="button" to="/ladder">
-        Back to the ladder
+        Retour au classement
       </Link>
     </main>
   )
