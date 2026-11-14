@@ -11,7 +11,7 @@ import {
   type Queryable,
   type Standing,
 } from '../src/index.js'
-import { createTestDb, type TestDb } from './helpers/db.js'
+import { createTestDb, type TestDb } from '@ashuworld/ledger/testing'
 
 // The level table is what turns a peak into a level; the action amounts are only
 // convenient round numbers for stacking a balance.

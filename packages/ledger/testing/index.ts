@@ -1,8 +1,16 @@
+/**
+ * The throwaway-schema harness every package's integration tests share.
+ *
+ * It lives outside `src/` on purpose: the coverage report measures `packages/<name>/src`
+ * only, so a test-only module here is not counted as untested production code, and apps
+ * cannot import it by accident through the package's root entry point. Import
+ * `@ashuworld/ledger/testing`.
+ */
 import { randomUUID } from 'node:crypto'
 import pg from 'pg'
 import type { Pool } from 'pg'
-import { attachIdleErrorHandler, withTransaction } from '../../src/db.js'
-import { migrate } from '../../src/migrate.js'
+import { attachIdleErrorHandler, withTransaction } from '../src/db.js'
+import { migrate } from '../src/migrate.js'
 
 export interface TestDb {
   /** Every connection in this pool sees the throwaway schema first. */
@@ -17,7 +25,7 @@ function testDatabaseUrl(): string {
   const url = process.env['TEST_DATABASE_URL']
   if (url === undefined || url.trim() === '') {
     throw new Error(
-      'TEST_DATABASE_URL is not set. The ledger tests run against a real Postgres 17, so export it before starting vitest: TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu',
+      'TEST_DATABASE_URL is not set. The integration tests run against a real Postgres 17, so export it before starting vitest: TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu',
     )
   }
   return url

@@ -10,7 +10,7 @@ import {
   withTransaction,
   type Queryable,
 } from '../src/index.js'
-import { createTestDb, type TestDb } from './helpers/db.js'
+import { createTestDb, type TestDb } from '@ashuworld/ledger/testing'
 
 // The amounts come from a config, never from a literal in the test: it proves the
 // ledger stores what `actionAmount` says an action pays, which is the wiring the
