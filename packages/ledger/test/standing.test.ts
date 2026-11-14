@@ -202,6 +202,22 @@ describe('standing', () => {
       expect(await balanceOf(fanId)).toBe(50)
     })
 
+    it('keeps a penalty after the identity that earned the xp detaches', async () => {
+      // Penalties are fan-owned precisely so they outlive a detach: the earn is forfeited
+      // and the identity unlinked, but the punishment still costs the account.
+      const fanId = await seedFan()
+      const identityId = await seedIdentity()
+      await attach(identityId, fanId)
+      await award(identityId, 'twitch.follow', 50, 'earn-1')
+      await penalize(fanId, -20, 'penalty-1')
+      expect(await balanceOf(fanId)).toBe(30)
+      expect(await recompute(fanId)).toEqual({ balance: 30, peakXp: 30, level: 0 })
+
+      await detach(identityId)
+      expect(await balanceOf(fanId)).toBe(-20)
+      expect(await recompute(fanId)).toEqual({ balance: -20, peakXp: 30, level: 0 })
+    })
+
     it('ignores an identity that is not attached even when its earn is not forfeited', async () => {
       // A live earn pays into an account only while the identity is attached. There are
       // two ways to be off the account without the rows being forfeited: no fan link at
@@ -323,6 +339,20 @@ describe('standing', () => {
       expect(await stored(fanId)).toEqual({ peak_xp: 0, level: 0 })
     })
 
+    it('derives the level from the stored peak, not from the live balance', async () => {
+      // Peak 700 is level 3; the live balance is only 400, which is level 2. The stored
+      // level is 1, so the early return cannot hide a balance-derived implementation:
+      // 2 > 1, and it would write 2. Only deriving from the returned peak writes 3.
+      const fanId = await seedFan()
+      const identityId = await seedIdentity()
+      await attach(identityId, fanId)
+      await award(identityId, 'youtube.subscribe', 400, 'earn-1')
+      await db.pool.query('update fans set peak_xp = 700, level = 1 where id = $1', [fanId])
+
+      expect(await recompute(fanId)).toEqual({ balance: 400, peakXp: 700, level: 3 })
+      expect(await stored(fanId)).toEqual({ peak_xp: 700, level: 3 })
+    })
+
     it('never writes a level below the one already stored', async () => {
       // The two writes are deliberately run without a transaction here, so a level change
       // can slip in between them. The `greatest` in the second statement is what keeps
@@ -416,6 +446,18 @@ describe('standing', () => {
   })
 
   describe('getStanding', () => {
+    it('returns zero standing for a fan with no entries', async () => {
+      // The lateral aggregate always produces its one row, so the fan row survives the
+      // join. A plain (non-lateral or inner) join regression would drop the fan and make
+      // a real account look missing.
+      const fanId = await seedFan()
+      expect(await withTransaction(db.pool, (tx) => getStanding(tx, fanId))).toEqual({
+        balance: 0,
+        peakXp: 0,
+        level: 0,
+      })
+    })
+
     it('reports the live balance beside the stored peak and level without writing', async () => {
       const fanId = await seedFan()
       const identityId = await seedIdentity()
