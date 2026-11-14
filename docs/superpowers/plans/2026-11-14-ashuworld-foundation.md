@@ -25,7 +25,7 @@
 - Configuration comes from the environment, with these names: `DATABASE_URL`, `PORT` (default 3000), `SESSION_COOKIE_NAME`, `COOKIE_SECURE`, `PUBLIC_BASE_URL`, `ALLOW_DEV_LOGIN`, `GAME_CONFIG_VERSION`, `ALPHA_RESET_CONFIRM`.
 - Integration tests need a real Postgres in `TEST_DATABASE_URL`; CI provides it as a service container. No test may point at a real deployment.
 - **Coverage floor: 80% lines, branches, functions and statements**, enforced by `vitest --coverage` in CI. A change that drops the workspace below the floor fails the build; there is no per-file exception.
-- **Every workspace package declares `test`, `typecheck` and `build` scripts.** `pnpm -r` silently skips a package that lacks them, so a missing script is a gate that never runs rather than an error.
+- **Every workspace package declares `test`, `typecheck` and `build` scripts.** `pnpm -r` silently skips a package that lacks them, so a missing script is a gate that never runs rather than an error. The `test` script is exactly `vitest run --root ../.. --project @ashuworld/<name>`: a bare `vitest run` inside a package resolves the root workspace globs against the package directory, finds no projects, and exits having run nothing.
 - **Every exploit path gets a test, not a comment.** Authorisation mistakes, cross-fan access, replayed events, reused handshakes, guessed session ids, leaked identifiers in public payloads and a reset that fires without confirmation each have a named negative test in the task that owns the code, and a task is not done until its negative tests fail for the right reason before the guard exists.
 
 ## Review Focus
@@ -142,7 +142,7 @@ packages:
   - packages/*
 ```
 
-Root `package.json` scripts: `"typecheck": "pnpm -r typecheck"`, `"lint": "eslint ."`, `"test": "vitest run"`, `"test:coverage": "vitest run --coverage"`, `"build": "pnpm -r build"`. Dev deps: `typescript`, `vitest`, `@vitest/coverage-v8`, `eslint`, `typescript-eslint`, `@types/node`. Each workspace package gets `"test": "vitest run"`, `"typecheck": "tsc --noEmit -p tsconfig.json"` and `"build": "tsc -b"`.
+Root `package.json` scripts: `"typecheck": "pnpm -r typecheck"`, `"lint": "eslint ."`, `"test": "vitest run"`, `"test:coverage": "vitest run --coverage"`, `"build": "pnpm -r build"`. Dev deps: `typescript`, `vitest`, `@vitest/coverage-v8`, `eslint`, `typescript-eslint`, `@types/node`. Each workspace package gets `"test": "vitest run --root ../.. --project @ashuworld/<name>"`, `"typecheck": "tsc --noEmit -p tsconfig.json"` and `"build": "tsc -b"`. The `--root ../..` is not decorative: a bare `vitest run` run from inside a package resolves the root workspace globs against that package's directory, matches nothing, and exits green without testing anything.
 
 Typechecking is per package, not one root program: the web app needs `jsx` and `DOM`, the worker needs neither, and a single program cannot serve both without every package inheriting the union of their settings. The root `tsconfig.json` carries `"files": []` and the `paths` map; it exists for editors and for the base settings, and it includes no sources.
 
