@@ -3,6 +3,7 @@ import type { Pool } from 'pg'
 import { createTestDb, type TestDb } from '@ashuworld/ledger/testing'
 import { ALPHA_RESET_CONFIRM_ENV, ALPHA_RESET_CONFIRM_VALUE } from '@ashuworld/ledger'
 import { runCli } from '../src/cli.js'
+import { createStubConnector } from '../src/connectors/stub.js'
 import type { ProcessorMap } from '../src/processors.js'
 
 let db: TestDb
@@ -134,6 +135,22 @@ describe('runCli', () => {
     expect(code).toBe(0)
     expect(err.lines).toEqual([])
     expect(await countRows('audit_log', `where kind = 'test.cli-loop'`)).toBe(1)
+  })
+
+  it('runs discovery beside the queue, and an aborted signal stops both without queuing', async () => {
+    const code = await runCli([], {
+      pool: db.pool,
+      processors: new Map(),
+      connectors: [createStubConnector(2)],
+      syncIntervalMs: 1,
+      signal: AbortSignal.abort(),
+      out: capture().write,
+      err: capture().write,
+    })
+
+    expect(code).toBe(0)
+    // The runner stops before its first round, so the stub never reaches the queue.
+    expect(await countRows('inbound_events')).toBe(0)
   })
 
   it('rejects an unknown argument without touching the database', async () => {
