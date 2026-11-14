@@ -1,34 +1,41 @@
 import { createPool } from '@ashuworld/ledger'
 import { runCli } from './cli.js'
-import type { ProcessorMap } from './processors.js'
+import { loadWorkerEnv } from './config.js'
+import { createConnectors } from './connectors/index.js'
+import { loadWorkerGameConfig } from './gameConfig.js'
+import { createProcessors } from './processors.js'
 
-/**
- * The processors this process runs.
- *
- * Empty for now: the platform connectors and their processors arrive in later plans. The
- * loop is still worth running — it is what drains whatever is already queued once a
- * processor is registered, and an empty map is the honest state of a worker that has
- * nowhere to send an event yet rather than a reason not to start.
- */
-const PROCESSORS: ProcessorMap = new Map()
-
-/**
- * `DATABASE_URL` or a message that names it. Empty is missing.
- *
- * The worker has no useful default: it is a consumer of the same schema the api writes,
- * and a guessed connection would either fail on the first poll with a driver error or,
- * worse, point at a database nobody intended.
- */
-function loadDatabaseUrl(raw: NodeJS.ProcessEnv = process.env): string {
-  const url = raw['DATABASE_URL']
-  if (url === undefined || url.trim() === '') {
-    throw new Error('DATABASE_URL is required but was not set; export it before starting the worker')
+/** The startup line that says what discovery this process runs, without naming any credential. */
+function logConnectors(names: readonly string[]): void {
+  if (names.length === 0) {
+    console.log(
+      '[worker] no discovery connector is on; the worker only drains what other processes queued',
+    )
+    return
   }
-  return url.trim()
+  console.log(`[worker] discovery connectors on: ${names.join(', ')}`)
+}
+
+/**
+ * The stub warning: loud, at startup, and impossible to mistake for real data.
+ *
+ * The stub writes invented fans and XP into the same tables a real connector would, so
+ * forgetting to turn it off leaves fabricated balances that look exactly like earned ones.
+ */
+function warnStub(people: number): void {
+  console.warn(
+    `[worker] the stub connector is ACTIVE: it invents ${people} people per run and ` +
+      'writes them to the real ledger. This is demo data, not real followers; ' +
+      'unset PLATFORM_CONNECTORS and ALLOW_STUB_CONNECTORS to stop it.',
+  )
 }
 
 /**
  * The process shell: real environment, real pool, real signals.
+ *
+ * The environment is read and validated first, so a typo in a switch stops the process
+ * before it opens a connection. Then the game config, the pool, the processors and the
+ * connectors are built once, at startup, and handed to the command dispatch.
  *
  * The command dispatch lives in `runCli` and returns an exit code; this function only
  * wires the environment, signals and the pool. SIGTERM (and SIGINT for a terminal) aborts
@@ -40,7 +47,15 @@ function loadDatabaseUrl(raw: NodeJS.ProcessEnv = process.env): string {
  * Postgres rolls it back if the process dies, so there is no half-wiped state to finish.
  */
 async function main(argv: readonly string[]): Promise<number> {
-  const pool = createPool(loadDatabaseUrl())
+  const env = loadWorkerEnv()
+  const cfg = loadWorkerGameConfig()
+  const pool = createPool(env.DATABASE_URL)
+  const processors = createProcessors(cfg)
+  const connectors = createConnectors(env)
+
+  logConnectors(connectors.map((connector) => connector.name))
+  if (env.PLATFORM_CONNECTORS.includes('stub')) warnStub(env.STUB_PEOPLE)
+
   const controller = new AbortController()
 
   const stop = (signal: NodeJS.Signals): void => {
@@ -53,7 +68,13 @@ async function main(argv: readonly string[]): Promise<number> {
 
   let code: number | undefined
   try {
-    code = await runCli(argv, { pool, processors: PROCESSORS, signal: controller.signal })
+    code = await runCli(argv, {
+      pool,
+      processors,
+      connectors,
+      syncIntervalMs: env.SYNC_INTERVAL_SECONDS * 1000,
+      signal: controller.signal,
+    })
   } finally {
     process.off('SIGTERM', stop)
     process.off('SIGINT', stop)
