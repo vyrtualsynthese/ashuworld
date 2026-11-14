@@ -1,28 +1,36 @@
-import { fileURLToPath } from 'node:url'
 import type { Pool } from 'pg'
-import { loadGameConfigFile } from '@ashuworld/gameconfig'
-import { ALPHA_RESET_CONFIRM_ENV, recomputeLevels, resetAlpha } from '@ashuworld/ledger'
+import {
+  ALPHA_RESET_CONFIRM_ENV,
+  enqueueEvent,
+  monthKey,
+  recomputeLevels,
+  resetAlpha,
+} from '@ashuworld/ledger'
+import { discoveryEventId, type DiscoveredPerson } from '@ashuworld/providers'
+import type { Connector } from './connectors/types.js'
+import { runDiscovery } from './discovery.js'
+import { loadWorkerGameConfig } from './gameConfig.js'
 import { runLoop } from './loop.js'
 import type { ProcessorMap } from './processors.js'
 
 /** The game config version the reset records, and every other process in the chart reads. */
 export const CONFIG_VERSION_ENV = 'GAME_CONFIG_VERSION'
 
-/**
- * The same file the api reads, resolved from this module rather than from an environment
- * variable, so both bundles find `/packages/gameconfig/config/game.json` in the image.
- * From `apps/worker/src/cli.ts` the three levels climb to the repository root; from the
- * bundled `/app/dist/worker.js` they reach `/`, which is where both Dockerfiles place it.
- */
-const GAME_CONFIG_PATH = fileURLToPath(
-  new URL('../../../packages/gameconfig/config/game.json', import.meta.url),
-)
+/** How long the worker waits between discovery rounds: fifteen minutes, the sync cadence. */
+export const DEFAULT_SYNC_INTERVAL_MS = 900_000
 
 export interface CliDeps {
   /** The database the command talks to. The shell owns creating and closing it. */
   pool: Pool
   /** The processors the queue loop runs. */
   processors: ProcessorMap
+  /**
+   * The discovery sources to run alongside the queue. Empty, the default, means the
+   * worker only drains what other processes already queued.
+   */
+  connectors?: Connector[]
+  /** How long to wait between discovery rounds, in milliseconds. Defaults to fifteen minutes. */
+  syncIntervalMs?: number
   /** Where progress goes. Defaults to `console.log`. */
   out?: (line: string) => void
   /** Where failures go. Defaults to `console.error`. */
@@ -59,7 +67,8 @@ function loadConfigVersion(): string {
  * `argv` is passed in rather than read here so the dispatch is testable: the tests call
  * this directly, and the process shell only wires the real pool and signals.
  *
- * - no argument: drain the queue, i.e. normal worker duty;
+ * - no argument: drain the queue, i.e. normal worker duty, and when `deps.connectors` is
+ *   non-empty also run discovery beside it so the queue has something to drain;
  * - `reset`: the one deliberate alpha wipe, guarded by `ALPHA_RESET_CONFIRM`;
  * - `recompute-levels`: re-read every fan's peak through the current level table and
  *   raise whatever the table now puts higher. It reads `GAME_CONFIG_VERSION` from the
@@ -77,12 +86,38 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
   const err = deps.err ?? ((line: string): void => console.error(line))
 
   if (argv.length === 0) {
+    const connectors = deps.connectors ?? []
+    const signalOptions = deps.signal === undefined ? {} : { signal: deps.signal }
     try {
-      await runLoop(
-        deps.pool,
-        deps.processors,
-        deps.signal === undefined ? {} : { signal: deps.signal },
-      )
+      // No connector: today's worker exactly, one loop and nothing else competing for the
+      // signal. This branch stays first so a deployment without platform keys cannot gain
+      // a timer it never needed.
+      if (connectors.length === 0) {
+        await runLoop(deps.pool, deps.processors, signalOptions)
+        return 0
+      }
+
+      // Discovery only writes queue rows; the drain loop stays the only thing that pays
+      // them. Both loops share one signal, so shutdown stops finding people and stops
+      // paying them at the same moment.
+      const enqueue = async (person: DiscoveredPerson): Promise<void> => {
+        const month = monthKey(new Date())
+        await enqueueEvent(deps.pool, {
+          provider: person.provider,
+          eventId: discoveryEventId('sync', person, month),
+          payload: { kind: 'discovery', ...person },
+        })
+      }
+
+      await Promise.all([
+        runLoop(deps.pool, deps.processors, signalOptions),
+        runDiscovery({
+          connectors,
+          enqueue,
+          intervalMs: deps.syncIntervalMs ?? DEFAULT_SYNC_INTERVAL_MS,
+          ...(deps.signal === undefined ? {} : { signal: deps.signal }),
+        }),
+      ])
       return 0
     } catch (error) {
       err(`[worker] the loop stopped with an error: ${messageOf(error)}`)
@@ -100,7 +135,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
     }
 
     try {
-      const cfg = loadGameConfigFile(GAME_CONFIG_PATH)
+      const cfg = loadWorkerGameConfig()
       const counts = await recomputeLevels(deps.pool, cfg)
       out(
         `[worker] level recompute complete: scanned ${counts.scanned} fans, ` +
