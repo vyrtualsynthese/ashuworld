@@ -4,6 +4,7 @@ import type { ProviderName } from '@ashuworld/providers'
 import {
   addPenalty,
   awardOnce,
+  computeBalance,
   createFan,
   detachIdentity,
   ensureIdentity,
@@ -190,6 +191,48 @@ describe('ladder', () => {
           },
         ],
       })
+    })
+
+    // The ladder's balance is a second, grouped form of the rule `computeBalance` runs per
+    // fan: one aggregate for the whole table rather than a lateral subquery per row. Two
+    // forms of one rule drift unless something compares them, so this pins the number.
+    it('reports the balance computeBalance does for every fan it lists', async () => {
+      // ashu exercises all three terms: two live earns, a penalty charged to the fan, and
+      // a detach that forfeits one identity's xp.
+      const ashu = await seedFan('ashu')
+      const ashuTwitch = await seedIdentity('twitch', 't-ashu', 'ashu_tv')
+      const ashuYoutube = await seedIdentity('youtube', 'y-ashu', 'ashu_yt')
+      await link(ashu, ashuTwitch)
+      await link(ashu, ashuYoutube)
+      await award(ashuTwitch, 'twitch', 'twitch.follow', 150, 'ashu-earn')
+      await award(ashuYoutube, 'youtube', 'youtube.subscribe', 100, 'ashu-yt')
+      await penalise(ashu, -25)
+      await withTransaction(db.pool, (tx) =>
+        detachIdentity(tx, { fanId: ashu, identityId: ashuTwitch, cfg }),
+      )
+
+      const bob = await seedFan('bob')
+      const bobTwitch = await seedIdentity('twitch', 't-bob', 'bob_tv')
+      await link(bob, bobTwitch)
+      await award(bobTwitch, 'twitch', 'twitch.follow', 50, 'bob-earn')
+
+      // 100 kept from youtube, minus the 25 penalty; the detached twitch earns are gone.
+      expect(await ladder()).toEqual({
+        linked: [
+          { fanId: ashu, handle: 'ashu', level: 1, balance: 75 },
+          { fanId: bob, handle: 'bob', level: 0, balance: 50 },
+        ],
+        freeStanding: [],
+      })
+
+      const { linked } = await ladder()
+      const fromComputeBalance: Array<[string, number]> = []
+      await withTransaction(db.pool, async (tx) => {
+        for (const row of linked) {
+          fromComputeBalance.push([row.fanId, await computeBalance(tx, row.fanId)])
+        }
+      })
+      expect(linked.map((row) => [row.fanId, row.balance])).toEqual(fromComputeBalance)
     })
 
     it('keeps a fan who forfeited everything on the ladder, at the bottom', async () => {
