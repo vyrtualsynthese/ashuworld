@@ -26,6 +26,11 @@ export function erasedExternalId(pepper: string, provider: string, externalId: s
 
 /** What an account erasure did, in counts only: nothing here can name the person again. */
 export interface EraseFanResult {
+  /**
+   * True when this call did the work, false when the account was already erased. The
+   * caller counts erasures from this, not from the rows it selected.
+   */
+  erased: boolean
   /** Identities detached and anonymised. */
   identities: number
   /** Live earns marked forfeited. The rows themselves are kept. */
@@ -34,8 +39,21 @@ export interface EraseFanResult {
 
 /** What a never-linked identity erasure did. */
 export interface EraseIdentityResult {
+  /** True when this call did the work, false when the identity was already erased. */
+  erased: boolean
   /** Live earns marked forfeited. The rows themselves are kept. */
   forfeitedEntries: number
+}
+
+/** No `fans` row has this id. */
+export class FanNotFoundError extends Error {
+  readonly fanId: string
+
+  constructor(fanId: string) {
+    super(`eraseFan: no fans row for ${fanId}`)
+    this.name = 'FanNotFoundError'
+    this.fanId = fanId
+  }
 }
 
 /** No `provider_identities` row has this id. */
@@ -90,13 +108,15 @@ export class IdentityAttachedError extends Error {
  * - `first_linked_at` on each identity. It is the mark that keeps a once-linked identity off
  *   the free-standing ladder, which is the only history erasure does not clear.
  *
- * The identity's provider id is replaced by a peppered hash, so the row can still be
- * recognised as the same provider account (a re-link finds it by hash only if someone
- * knows the raw id and the pepper) without storing what it was. `linked_at` is cleared but
- * `first_linked_at` is deliberately not touched.
+ * The identity's provider id is replaced by a peppered hash: the row still stands for the
+ * same provider account to anyone holding the raw id and the pepper, and stores nothing
+ * that names it. Nothing reads that hash back today — the sign-in resolver that matches an
+ * incoming provider id against it is the next task on this branch (Task 10) — so for now a
+ * re-link happens by identity id. `linked_at` is cleared but `first_linked_at` is
+ * deliberately not touched.
  *
  * A second call is a no-op: the `erased_at is null` guard makes the anonymising update
- * match no row, and the function returns zeros without writing a second audit row.
+ * match no row, and the function returns `erased: false` with zeros and no second audit row.
  *
  * The audit row carries counts only and no fan, identity or actor id. An audit trail that
  * named the erased account would put the personal data back into a table built to outlive
@@ -108,6 +128,9 @@ export async function eraseFan(
 ): Promise<EraseFanResult> {
   await requireTransaction(tx)
 
+  // lock order: the fan row before its identities, as `detachIdentity` takes them.
+  // `linkIdentity` is the outlier (identity first), so a concurrent link and erasure can
+  // deadlock; Postgres aborts one side and nothing is corrupted.
   const erased = await tx.query<{ id: string }>(
     `update fans
         set handle = 'deleted_' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 16),
@@ -125,9 +148,9 @@ export async function eraseFan(
       [input.fanId],
     )
     const fan = existing.rows[0]
-    if (fan === undefined) throw new Error(`eraseFan: no fans row for ${input.fanId}`)
+    if (fan === undefined) throw new FanNotFoundError(input.fanId)
     // Already erased: the work is done, and doing it again would write a second audit row.
-    return { identities: 0, forfeitedEntries: 0 }
+    return { erased: false, identities: 0, forfeitedEntries: 0 }
   }
 
   const identities = await tx.query<{ id: string; provider: string; external_id: string }>(
@@ -174,7 +197,7 @@ export async function eraseFan(
     [identities.rows.length, forfeitedEntries],
   )
 
-  return { identities: identities.rows.length, forfeitedEntries }
+  return { erased: true, identities: identities.rows.length, forfeitedEntries }
 }
 
 /**
@@ -188,6 +211,13 @@ export async function eraseFan(
  * The row is locked before it is read, so two concurrent erasures cannot both hash the raw
  * id: the second waits, then hashes the already-erased value, which produces another
  * harmless ciphertext rather than resurrecting anything.
+ *
+ * A retry is idempotent: an id that already carries the `erased:` prefix is not hashed a
+ * second time, so the stored value stays exactly what the first call wrote. The forfeit
+ * still runs, because an event may have paid the erased row a fresh earn since.
+ *
+ * One audit row records an erasure that actually happened: counts only, no fan, identity or
+ * actor id, in the same spirit as the account erasure's row.
  */
 export async function eraseIdentity(
   tx: Queryable,
@@ -206,11 +236,15 @@ export async function eraseIdentity(
   if (identity === undefined) throw new IdentityNotFoundError(input.identityId)
   if (identity.fan_id !== null) throw new IdentityAttachedError(input.identityId, identity.fan_id)
 
-  await tx.query(
+  // The `erased:` guard is what makes a retry a no-op. Without it the second call would
+  // hash the ciphertext, and the stored value would change on every pass.
+  const erased = await tx.query<{ id: string }>(
     `update provider_identities
         set external_id = $2,
             display_handle = 'Compte supprimé'
-      where id = $1`,
+      where id = $1
+        and external_id not like 'erased:%'
+      returning id`,
     [input.identityId, erasedExternalId(input.pepper, identity.provider, identity.external_id)],
   )
 
@@ -224,7 +258,17 @@ export async function eraseIdentity(
     [input.identityId],
   )
 
-  return { forfeitedEntries: forfeited.rows.length }
+  const didErase = erased.rows[0] !== undefined
+  if (didErase) {
+    await tx.query(
+      `insert into audit_log (kind, fan_id, identity_id, actor_fan_id, detail)
+       values ('erase-identity', null, null, null,
+               jsonb_build_object('forfeitedEntries', $1::int))`,
+      [forfeited.rows.length],
+    )
+  }
+
+  return { erased: didErase, forfeitedEntries: forfeited.rows.length }
 }
 
 /** One provider account on an exported profile. The provider id itself is not included. */
@@ -381,9 +425,9 @@ export const AUDIT_RETENTION_DAYS = 1095
 
 /** What one purge pass removed. Counts only, in the same spirit as the erasure results. */
 export interface PurgeResult {
-  /** Accounts passed through `eraseFan`. */
+  /** Accounts this pass actually erased. */
   fans: number
-  /** Never-linked identities passed through `eraseIdentity`. */
+  /** Never-linked identities this pass actually erased. */
   identities: number
   /** Processed provider events deleted. */
   events: number
@@ -498,20 +542,28 @@ export async function purgeBatch(
       [identityCutoff, limit],
     )
 
+    // The totals come from the helpers' own answers, not from what this pass selected: a row
+    // that another sweep erased first, or that `eraseFan` found already gone, did not happen
+    // here and must not be reported as work this pass did. A dry run has no helper answers,
+    // so it counts the selection it just made.
+    let fans = inactive.rows.length
+    let identities = neverLinked.rows.length
     if (!input.dryRun) {
+      fans = 0
+      identities = 0
       for (const fan of inactive.rows) {
-        await eraseFan(tx, { fanId: fan.id, pepper: input.pepper })
+        const erasedFan = await eraseFan(tx, { fanId: fan.id, pepper: input.pepper })
+        if (erasedFan.erased) fans += 1
       }
       for (const identity of neverLinked.rows) {
-        await eraseIdentity(tx, { identityId: identity.id, pepper: input.pepper })
+        const erasedIdentityRow = await eraseIdentity(tx, {
+          identityId: identity.id,
+          pepper: input.pepper,
+        })
+        if (erasedIdentityRow.erased) identities += 1
       }
     }
 
-    return {
-      fans: inactive.rows.length,
-      identities: neverLinked.rows.length,
-      events,
-      audit,
-    }
+    return { fans, identities, events, audit }
   })
 }

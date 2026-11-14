@@ -64,6 +64,7 @@ export {
   AUDIT_RETENTION_DAYS,
   ERASURE_PEPPER_ENV,
   INACTIVE_FAN_RETENTION_DAYS,
+  FanNotFoundError,
   IdentityAttachedError,
   IdentityNotFoundError,
   NEVER_LINKED_IDENTITY_RETENTION_DAYS,
