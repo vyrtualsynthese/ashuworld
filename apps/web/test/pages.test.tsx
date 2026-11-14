@@ -174,6 +174,9 @@ describe('Xp', () => {
       within(rows[0]!).getByRole('columnheader', { name: 'Plateforme' }),
     ).toBeInTheDocument()
     expect(within(rows[0]!).getByRole('columnheader', { name: 'XP' })).toBeInTheDocument()
+    expect(
+      within(rows[0]!).getByRole('columnheader', { name: 'Par mois' }),
+    ).toBeInTheDocument()
 
     for (const [index, action] of GAME.actions.entries()) {
       const row = rows[index + 1]!
@@ -181,12 +184,33 @@ describe('Xp', () => {
       expect(within(row).getByText(action.label).tagName).toBe('STRONG')
       expect(within(row).getByText(action.description)).toBeInTheDocument()
       expect(within(row).getByText(formatNumber(action.amount))).toBeInTheDocument()
+      // A zero would read as "this action pays nothing"; the dash says "no recurring
+      // amount", while the one-time amount beside it still shows what the bonus is.
+      const monthly = action.monthly > 0 ? formatNumber(action.monthly) : '—'
+      expect(within(row).getByText(monthly)).toBeInTheDocument()
     }
 
     // The platform is named for a reader, not echoed as the api's slug.
     expect(within(rows[1]!).getByText('YouTube')).toBeInTheDocument()
     expect(within(rows[2]!).getByText('Discord')).toBeInTheDocument()
     expect(within(rows[3]!).getByText('Twitch')).toBeInTheDocument()
+  })
+
+  it('explains the one-time bonus, the monthly amount, and what stops', async () => {
+    stubFetch(() => jsonResponse(GAME))
+
+    renderPage(<Xp />, '/xp')
+
+    expect(
+      await screen.findByText(
+        /le bonus est versé une seule fois, puis un montant revient chaque mois tant que la condition est remplie/i,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /si tu retires ton abonnement ou quittes le serveur, les mois suivants ne sont plus crédités\. l'xp déjà gagnée et ton niveau restent/i,
+      ),
+    ).toBeInTheDocument()
   })
 
   it('renders the level thresholds in order, formatted for reading', async () => {
