@@ -72,12 +72,44 @@ describe('schema', () => {
   })
 
   it('refuses an entry owned by both an identity and a fan', async () => {
+    // Real ids, so only the owner CHECK can fire; a made-up uuid would let the foreign
+    // key throw the same way and the test would survive the CHECK being dropped.
+    const identityId = await seedIdentity(db)
+    const fanId = await seedFan(db)
     await expect(
       db.pool.query(
         `insert into xp_entries (identity_id, fan_id, provider, action_key, amount, kind, idempotency_key)
-         values (gen_random_uuid(), gen_random_uuid(), 'twitch', 'twitch.follow', 50, 'earn', 'k1')`,
+         values ($1, $2, 'twitch', 'twitch.follow', 50, 'earn', 'k1')`,
+        [identityId, fanId],
       ),
-    ).rejects.toThrow()
+    ).rejects.toThrow(/xp_entries_one_owner/)
+  })
+
+  it('refuses an entry owned by neither', async () => {
+    await expect(
+      db.pool.query(
+        `insert into xp_entries (provider, action_key, amount, kind, idempotency_key)
+         values ('twitch', 'twitch.follow', 50, 'earn', 'k2')`,
+      ),
+    ).rejects.toThrow(/xp_entries_one_owner/)
+  })
+
+  it('accepts an identity-only earn', async () => {
+    const identityId = await seedIdentity(db)
+    await seedEarn(db, identityId, 'twitch.follow', 'earn_only')
+    const { rows } = await db.pool.query<{ n: string }>('select count(*)::text as n from xp_entries')
+    expect(rows[0]?.n).toBe('1')
+  })
+
+  it('accepts a fan-only penalty with a reason', async () => {
+    const fanId = await seedFan(db)
+    await db.pool.query(
+      `insert into xp_entries (fan_id, provider, action_key, amount, kind, reason, idempotency_key)
+       values ($1, 'twitch', 'operator.penalty', -25, 'penalty', 'insulting chat', 'penalty_only')`,
+      [fanId],
+    )
+    const { rows } = await db.pool.query<{ amount: number }>('select amount from xp_entries')
+    expect(rows[0]?.amount).toBe(-25)
   })
 
   // The partial unique index is the mechanism the whole game rests on: a one-time action

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import pg from 'pg'
 import type { Pool } from 'pg'
-import { withTransaction } from '../../src/db.js'
+import { attachIdleErrorHandler, withTransaction } from '../../src/db.js'
 import { migrate } from '../../src/migrate.js'
 
 export interface TestDb {
@@ -50,6 +50,7 @@ export async function createTestDb(options: { migrate?: boolean } = {}): Promise
     connectionString: testDatabaseUrl(),
     options: `-c search_path=${schema},public`,
   })
+  attachIdleErrorHandler(pool)
 
   await installPgcrypto(pool)
   await pool.query(`create schema "${schema}"`)
@@ -67,8 +68,12 @@ export async function createTestDb(options: { migrate?: boolean } = {}): Promise
   }
 
   async function reset(): Promise<void> {
+    // The schema name from the closure, not current_schema(): if the throwaway schema
+    // ever left the search path, current_schema() would be public and this would
+    // truncate a developer's real tables.
     const { rows } = await pool.query<{ tablename: string }>(
-      `select tablename from pg_tables where schemaname = current_schema() and tablename <> '_migrations'`,
+      `select tablename from pg_tables where schemaname = $1 and tablename <> '_migrations'`,
+      [schema],
     )
     if (rows.length === 0) return
     const tables = rows.map((row) => `"${row.tablename}"`).join(', ')
