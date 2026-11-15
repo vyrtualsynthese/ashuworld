@@ -13,6 +13,7 @@ import {
   eraseIdentity,
   erasedExternalId,
   exportFan,
+  findIdentityForLogin,
   getFanByHandle,
   linkIdentity,
   listLadder,
@@ -281,6 +282,52 @@ describe('privacy', () => {
       [identityId],
     )
     expect(attached[0]?.fan_id).toBe(fanId)
+  })
+
+  describe('findIdentityForLogin', () => {
+    it('finds a live identity by its raw provider id', async () => {
+      const identityId = await seedIdentity('t-live', 'live_tv')
+
+      const found = await withTransaction(db.pool, (tx) =>
+        findIdentityForLogin(tx, { provider: 'twitch', externalId: 't-live', pepper }),
+      )
+
+      expect(found).toEqual({ id: identityId })
+    })
+
+    it('finds an erased identity by the raw id the provider still sends', async () => {
+      const { fanId, identityId } = await seedAccount()
+      await withTransaction(db.pool, (tx) => eraseFan(tx, { fanId, pepper }))
+
+      // The provider keeps sending the same account id. Only the caller holding the pepper
+      // can compute the stored pseudonym, which is what makes the sign-in match possible.
+      const found = await withTransaction(db.pool, (tx) =>
+        findIdentityForLogin(tx, { provider: 'twitch', externalId: 't-1', pepper }),
+      )
+
+      expect(found).toEqual({ id: identityId })
+    })
+
+    it('answers null for an unknown provider account and for a wrong pepper', async () => {
+      expect(
+        await withTransaction(db.pool, (tx) =>
+          findIdentityForLogin(tx, { provider: 'twitch', externalId: 't-never', pepper }),
+        ),
+      ).toBeNull()
+
+      const { fanId } = await seedAccount()
+      await withTransaction(db.pool, (tx) => eraseFan(tx, { fanId, pepper }))
+
+      expect(
+        await withTransaction(db.pool, (tx) =>
+          findIdentityForLogin(tx, {
+            provider: 'twitch',
+            externalId: 't-1',
+            pepper: 'another-pepper',
+          }),
+        ),
+      ).toBeNull()
+    })
   })
 
   it('exports an active account with its entries and answers null otherwise', async () => {

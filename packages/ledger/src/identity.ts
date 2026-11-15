@@ -1,5 +1,6 @@
-import type { IdentityProfile } from '@ashuworld/providers'
+import type { IdentityProfile, ProviderName } from '@ashuworld/providers'
 import type { Queryable } from './db.js'
+import { erasedExternalId } from './privacy.js'
 
 /** The ledger's handle on one provider account. */
 export interface IdentityRef {
@@ -37,4 +38,48 @@ export async function ensureIdentity(tx: Queryable, profile: IdentityProfile): P
     throw new Error(`ensureIdentity: ${profile.provider} identity ${profile.externalId} returned no row`)
   }
   return { id: row.id }
+}
+
+/**
+ * The identity a provider account already owns, erased or not. Read-only: nothing here
+ * inserts or updates, so a sign-in that finds nothing is free to create the row.
+ *
+ * Two lookups, in this order, because they mean different things:
+ *
+ * 1. the raw `(provider, external_id)` — a live identity stores exactly what the provider
+ *    sends, so this is the ordinary returning fan;
+ * 2. the peppered pseudonym `erasedExternalId` computes — an erased identity keeps its row
+ *    (its one-time earn keys must survive) but its provider id is replaced by that hash.
+ *    Without this second lookup, the same person signing in again would look like a
+ *    stranger, get a second identity row and collect the welcome bonus twice.
+ *
+ * The raw match must win. A real identity always carries a raw provider id, and only an
+ * erased one carries the `erased:` pseudonym, so a provider id that happens to look like a
+ * pseudonym still resolves to the row that literally stores it rather than to a hash of
+ * itself. One `or` over both values could not express that precedence.
+ */
+export async function findIdentityForLogin(
+  tx: Queryable,
+  input: { provider: ProviderName; externalId: string; pepper: string },
+): Promise<IdentityRef | null> {
+  const raw = await tx.query<{ id: string }>(
+    `select id
+       from provider_identities
+      where provider = $1
+        and external_id = $2`,
+    [input.provider, input.externalId],
+  )
+  const live = raw.rows[0]
+  if (live !== undefined) return { id: live.id }
+
+  const pseudonym = erasedExternalId(input.pepper, input.provider, input.externalId)
+  const erased = await tx.query<{ id: string }>(
+    `select id
+       from provider_identities
+      where provider = $1
+        and external_id = $2`,
+    [input.provider, pseudonym],
+  )
+  const anonymised = erased.rows[0]
+  return anonymised === undefined ? null : { id: anonymised.id }
 }
