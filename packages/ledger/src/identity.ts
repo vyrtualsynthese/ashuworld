@@ -40,6 +40,35 @@ export async function ensureIdentity(tx: Queryable, profile: IdentityProfile): P
   return { id: row.id }
 }
 
+/** An identity a sign-in matched, and whether it matched through its anonymised pseudonym. */
+export interface LoginIdentityRef extends IdentityRef {
+  /**
+   * True when the row's provider id is the peppered pseudonym `erasedExternalId` writes, not
+   * the raw id the provider sends. It is the one authoritative answer to "was this account
+   * erased", so no caller has to guess from the stored value's shape.
+   */
+  erased: boolean
+}
+
+/**
+ * Sets the handle an identity displays from the provider's current profile.
+ *
+ * `ensureIdentity` refreshes it on its upsert, but a sign-in that matched an existing row
+ * reads instead of upserting, so the refresh is a call of its own: a fan who renamed on the
+ * provider sees the new name on their next login. Kept here so the api never writes the
+ * table itself.
+ */
+export async function refreshIdentityHandle(
+  tx: Queryable,
+  identityId: string,
+  displayHandle: string,
+): Promise<void> {
+  await tx.query('update provider_identities set display_handle = $2 where id = $1', [
+    identityId,
+    displayHandle,
+  ])
+}
+
 /**
  * The identity a provider account already owns, erased or not. Read-only: nothing here
  * inserts or updates, so a sign-in that finds nothing is free to create the row.
@@ -53,15 +82,18 @@ export async function ensureIdentity(tx: Queryable, profile: IdentityProfile): P
  *    Without this second lookup, the same person signing in again would look like a
  *    stranger, get a second identity row and collect the welcome bonus twice.
  *
- * The raw match must win. A real identity always carries a raw provider id, and only an
- * erased one carries the `erased:` pseudonym, so a provider id that happens to look like a
- * pseudonym still resolves to the row that literally stores it rather than to a hash of
+ * The raw match must win, and it is also what the answer's `erased: false` means. A real
+ * identity always carries a raw provider id, so a provider id that happens to begin with
+ * `erased:` still resolves to the row that literally stores it rather than to a hash of
  * itself. One `or` over both values could not express that precedence.
+ *
+ * The pseudonym includes the provider name, so the same account id on two providers hashes
+ * to two different values and a lookup never crosses providers.
  */
 export async function findIdentityForLogin(
   tx: Queryable,
   input: { provider: ProviderName; externalId: string; pepper: string },
-): Promise<IdentityRef | null> {
+): Promise<LoginIdentityRef | null> {
   const raw = await tx.query<{ id: string }>(
     `select id
        from provider_identities
@@ -70,7 +102,7 @@ export async function findIdentityForLogin(
     [input.provider, input.externalId],
   )
   const live = raw.rows[0]
-  if (live !== undefined) return { id: live.id }
+  if (live !== undefined) return { id: live.id, erased: false }
 
   const pseudonym = erasedExternalId(input.pepper, input.provider, input.externalId)
   const erased = await tx.query<{ id: string }>(
@@ -81,5 +113,5 @@ export async function findIdentityForLogin(
     [input.provider, pseudonym],
   )
   const anonymised = erased.rows[0]
-  return anonymised === undefined ? null : { id: anonymised.id }
+  return anonymised === undefined ? null : { id: anonymised.id, erased: true }
 }

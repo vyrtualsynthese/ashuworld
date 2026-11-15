@@ -292,7 +292,7 @@ describe('privacy', () => {
         findIdentityForLogin(tx, { provider: 'twitch', externalId: 't-live', pepper }),
       )
 
-      expect(found).toEqual({ id: identityId })
+      expect(found).toEqual({ id: identityId, erased: false })
     })
 
     it('finds an erased identity by the raw id the provider still sends', async () => {
@@ -305,7 +305,29 @@ describe('privacy', () => {
         findIdentityForLogin(tx, { provider: 'twitch', externalId: 't-1', pepper }),
       )
 
-      expect(found).toEqual({ id: identityId })
+      expect(found).toEqual({ id: identityId, erased: true })
+    })
+
+    it('never matches the pseudonym of the same id on another provider', async () => {
+      const fanId = await seedFan()
+      const shared = await seedIdentity('shared', 'shared_tv', 'twitch')
+      await link(fanId, shared)
+      await withTransaction(db.pool, (tx) => eraseFan(tx, { fanId, pepper }))
+
+      // The pseudonym covers `provider:externalId`, so the owning provider still resolves...
+      expect(
+        await withTransaction(db.pool, (tx) =>
+          findIdentityForLogin(tx, { provider: 'twitch', externalId: 'shared', pepper }),
+        ),
+      ).toEqual({ id: shared, erased: true })
+
+      // ...and the same raw id on another provider hashes to something else, so it is a
+      // stranger there rather than somebody else's erased account.
+      expect(
+        await withTransaction(db.pool, (tx) =>
+          findIdentityForLogin(tx, { provider: 'dev', externalId: 'shared', pepper }),
+        ),
+      ).toBeNull()
     })
 
     it('answers null for an unknown provider account and for a wrong pepper', async () => {

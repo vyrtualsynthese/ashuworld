@@ -268,17 +268,31 @@ interface IdentityRow {
   fan_id: string | null
   linked_at: Date | null
   first_linked_at: Date | null
+  display_handle: string
 }
 
 async function identityRow(externalId: string): Promise<IdentityRow> {
   const { rows } = await db.pool.query<IdentityRow>(
-    `select id, fan_id, linked_at, first_linked_at
+    `select id, fan_id, linked_at, first_linked_at, display_handle
        from provider_identities
       where provider = 'dev' and external_id = $1`,
     [externalId],
   )
   const row = rows[0]
   if (row === undefined) throw new Error(`no dev identity ${externalId}`)
+  return row
+}
+
+/** The same row read by id, for a test that no longer knows its provider id. */
+async function identityById(id: string): Promise<IdentityRow> {
+  const { rows } = await db.pool.query<IdentityRow>(
+    `select id, fan_id, linked_at, first_linked_at, display_handle
+       from provider_identities
+      where id = $1`,
+    [id],
+  )
+  const row = rows[0]
+  if (row === undefined) throw new Error(`no identity ${id}`)
   return row
 }
 
@@ -301,14 +315,20 @@ async function seedTwitchIdentity(fanId: string): Promise<string> {
  * Attaches the dev identity a login for `handle` would resolve to, to an existing fan.
  *
  * This is the fan the gate meets on a second visit: already known, possibly with no
- * acceptance recorded because they signed in before the terms existed.
+ * acceptance recorded because they signed in before the terms existed. `displayHandle` is
+ * what the identity row says, which a test can set behind the provider's back to stand for
+ * a rename the last provider event has not carried yet.
  */
-async function seedDevIdentity(fanId: string, handle: string): Promise<void> {
+async function seedDevIdentity(
+  fanId: string,
+  handle: string,
+  displayHandle = handle,
+): Promise<void> {
   await withTransaction(db.pool, async (tx) => {
     const identity = await ensureIdentity(tx, {
       provider: 'dev',
       externalId: `dev:${handle}`,
-      displayHandle: handle,
+      displayHandle,
       displayName: handle,
     })
     const linked = await linkIdentity(tx, { fanId, identityId: identity.id, cfg })
@@ -678,6 +698,20 @@ describe('GET /auth/:provider/callback: login', () => {
     })
   })
 
+  it('refreshes the identity handle from the provider profile', async () => {
+    await withApp(async (app) => {
+      const fanId = await seedFan('ada')
+      // The row still shows the name the last provider event carried; the fan has renamed
+      // since. A matched identity is only read at login, so the refresh has to be explicit.
+      await seedDevIdentity(fanId, 'ada', 'old_handle')
+
+      const { res } = await login(app, 'ada')
+
+      expect(res.statusCode).toBe(302)
+      expect((await identityRow('dev:ada')).display_handle).toBe('ada')
+    })
+  })
+
   it('deduplicates a handle that is already taken', async () => {
     await withApp(async (app) => {
       await seedFan('ashu')
@@ -874,6 +908,9 @@ describe('returning erased account', () => {
       expect(earned.awarded).toBe(true)
 
       await withTransaction(db.pool, (tx) => eraseFan(tx, { fanId, pepper: 'test-pepper' }))
+      // Erasure neutralises the handle the row displayed; the sign-in must put the current
+      // profile's handle back, or the account would show "Compte supprimé" for its own name.
+      expect((await identityById(identity.id)).display_handle).toBe('Compte supprimé')
 
       const { cookie, res } = await login(app, 'ada')
 
@@ -889,17 +926,14 @@ describe('returning erased account', () => {
       expect(profile.balance).toBe(0)
       expect(profile.level).toBe(0)
 
-      // The same identity row, re-attached: no second row, and the mark that keeps it off
-      // the free-standing ladder is still there.
+      // The same identity row, re-attached: no second row, the mark that keeps it off the
+      // free-standing ladder is still there, and it shows the handle the provider shows now.
       expect(await count('provider_identities')).toBe(1)
-      const { rows: identityRows } = await db.pool.query<{
-        id: string
-        fan_id: string | null
-        first_linked_at: Date | null
-      }>('select id, fan_id, first_linked_at from provider_identities where id = $1', [identity.id])
-      expect(identityRows[0]?.id).toBe(identity.id)
-      expect(identityRows[0]?.fan_id).toBe(profile.id)
-      expect(identityRows[0]?.first_linked_at).not.toBeNull()
+      const restarted = await identityById(identity.id)
+      expect(restarted.id).toBe(identity.id)
+      expect(restarted.fan_id).toBe(profile.id)
+      expect(restarted.first_linked_at).not.toBeNull()
+      expect(restarted.display_handle).toBe('ada')
 
       const { rows: fanRows } = await db.pool.query<{ terms_version: string | null }>(
         'select terms_version from fans where id = $1',
