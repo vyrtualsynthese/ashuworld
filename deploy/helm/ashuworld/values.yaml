@@ -105,6 +105,40 @@ erasure:
   # The key in that Secret whose value is the pepper itself.
   pepperKey: pepper
 
+providers:
+  # The name of an existing Secret in the release namespace that holds the OAuth credentials
+  # for the sign-in and follower providers. Like the database URL above, it is an external
+  # fact: the chart never creates it and never renders its contents, because a client secret
+  # in a manifest is also a client secret in `helm get manifest` and in the release's stored
+  # values.
+  #
+  # The keys read from it, none of which the chart requires:
+  #   twitch-client-id      -> TWITCH_CLIENT_ID             (api and worker)
+  #   twitch-client-secret  -> TWITCH_CLIENT_SECRET         (api and worker)
+  #   twitch-channel-token  -> TWITCH_CHANNEL_REFRESH_TOKEN (worker only)
+  #   platform-token-key    -> PLATFORM_TOKEN_KEY           (worker only)
+  #
+  #   kubectl create secret generic ashuworld-providers \
+  #     --from-literal=twitch-client-id='<client id>' \
+  #     --from-literal=twitch-client-secret='<client secret>' \
+  #     --from-literal=twitch-channel-token='<refresh token from twitch-authorize>' \
+  #     --from-literal=platform-token-key='<the key the stored grant was sealed with>'
+  #
+  # platform-token-key is the key the worker encrypts the stored Twitch grant with (a fresh
+  # one comes from `openssl rand -base64 32`). It must be the same key the worker sealed the
+  # stored grant with, so copy the value out of the environment that created it: a different
+  # key cannot open the stored tokens, and the follower poll stops with an error saying so.
+  #
+  # Every reference is optional. A missing key means "that provider is off" and the pod starts
+  # normally; a half-filled client pair is the api's and worker's own startup error, not a
+  # pod that never appears. An empty secretName mounts no provider credential at all.
+  secretName: ""
+  twitch:
+    # The Twitch channel the follower poll reads, and the account the sign-in door expects.
+    # It is not a credential, so it is plain environment on both Deployments, and it is left
+    # out entirely while empty: the provider is off until both this and the Secret are set.
+    channelLogin: ""
+
 game:
   # Must match "version" in packages/gameconfig/config/game.json. The api and worker receive
   # it as GAME_CONFIG_VERSION, and the alpha reset Job logs it with the counts it deleted.
