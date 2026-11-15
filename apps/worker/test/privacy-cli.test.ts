@@ -341,6 +341,56 @@ describe('runCli privacy commands', () => {
     expect(after.freeStanding).toEqual([])
   })
 
+  it('reports the forfeit when "erase-identity" meets an already-erased row that earned again', async () => {
+    // An erased row keeps its placeholder handle, so a second pass names it that way: the
+    // earn below stands for the event that paid the anonymised row after the first erasure.
+    // That is not "nothing changed" — the live earn is forfeited this time — and the
+    // handle-based command has to say so, exactly as "erase-identity-id" already does.
+    const identityId = await seedFreeIdentity({ externalId: 'ext-again', displayHandle: 'again' })
+    process.env[ERASURE_PEPPER_ENV] = PEPPER
+    const firstRun = await runCli(['erase-identity', 'twitch', 'again'], {
+      pool: db.pool,
+      processors: new Map(),
+      out: capture().write,
+      err: capture().write,
+    })
+    expect(firstRun).toBe(0)
+
+    await db.pool.query(
+      `insert into xp_entries (identity_id, provider, action_key, amount, kind, idempotency_key)
+       values ($1, 'twitch', 'twitch.sub', 20, 'earn', 'privacy-cli-again')`,
+      [identityId],
+    )
+
+    const out = capture()
+    const err = capture()
+    const code = await runCli(['erase-identity', 'twitch', 'Compte supprimé'], {
+      pool: db.pool,
+      processors: new Map(),
+      out: out.write,
+      err: err.write,
+    })
+
+    expect(code).toBe(0)
+    expect(err.lines).toEqual([])
+    const printed = out.lines.join('\n')
+    expect(printed).toContain('erased false')
+    expect(printed).toContain('forfeitedEntries 1')
+    expect(printed).toContain('forfeited this time')
+    expect(printed).not.toContain('nothing changed')
+
+    const { rows } = await db.pool.query<{ live_earns: number; external_id: string }>(
+      `select i.external_id,
+              (select count(*)::int from xp_entries e
+                where e.identity_id = i.id and e.forfeited_at is null) as live_earns
+         from provider_identities i where i.id = $1`,
+      [identityId],
+    )
+    expect(rows[0]?.live_earns).toBe(0)
+    // The pseudonym is not hashed a second time: the row still carries the first one.
+    expect(rows[0]?.external_id.startsWith('erased:')).toBe(true)
+  })
+
   it('refuses "erase-identity" when two identities share a provider and handle', async () => {
     const leftId = await seedFreeIdentity({ externalId: 'ext-left', displayHandle: 'same' })
     const rightId = await seedFreeIdentity({ externalId: 'ext-right', displayHandle: 'same' })

@@ -13,6 +13,7 @@ import {
   recomputeLevels,
   resetAlpha,
   withTransaction,
+  type EraseIdentityResult,
 } from '@ashuworld/ledger'
 import { PROVIDER_NAMES, isProviderName } from '@ashuworld/providers'
 import type { Connector } from './connectors/types.js'
@@ -109,6 +110,26 @@ const IDENTITY_ID_PATTERN =
 
 function isIdentityId(value: string): boolean {
   return IDENTITY_ID_PATTERN.test(value)
+}
+
+/**
+ * One line for an identity erasure, in three outcomes rather than two.
+ *
+ * `erased` false with a forfeit is a retry that met an earn recorded after the first
+ * erasure: the row was already anonymised, but that earn is gone now, so "nothing changed"
+ * would be a lie. Both identity commands print this line, so the handle-based one cannot
+ * drift back to the two-outcome wording the id-based one outgrew.
+ */
+function identityErasureLine(result: EraseIdentityResult): string {
+  const outcome = result.erased
+    ? 'the identity is erased'
+    : result.forfeitedEntries > 0
+      ? 'the row was already anonymised, and its live earns were forfeited this time'
+      : 'it was already erased, so nothing changed'
+  return (
+    `[worker] identity erasure complete: erased ${result.erased}, ` +
+    `forfeitedEntries ${result.forfeitedEntries}; ${outcome}`
+  )
 }
 
 /**
@@ -344,13 +365,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
       const result = await withTransaction(deps.pool, (tx) =>
         eraseIdentity(tx, { identityId, pepper }),
       )
-      out(
-        `[worker] identity erasure complete: erased ${result.erased}, ` +
-          `forfeitedEntries ${result.forfeitedEntries}; ` +
-          (result.erased
-            ? 'the identity is erased'
-            : 'it was already erased, so nothing changed'),
-      )
+      out(identityErasureLine(result))
       return 0
     } catch (error) {
       err(`[worker] the erasure did not run: ${messageOf(error)}`)
@@ -390,15 +405,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
       // Three outcomes, not two. `erased` false with a forfeit is a retry that met an earn
       // recorded after the first erasure: the row was already anonymised, but that earn is
       // gone now, so "nothing changed" would be a lie.
-      const outcome = result.erased
-        ? 'the identity is erased'
-        : result.forfeitedEntries > 0
-          ? 'the row was already anonymised, and its live earns were forfeited this time'
-          : 'it was already erased, so nothing changed'
-      out(
-        `[worker] identity erasure complete: erased ${result.erased}, ` +
-          `forfeitedEntries ${result.forfeitedEntries}; ${outcome}`,
-      )
+      out(identityErasureLine(result))
       return 0
     } catch (error) {
       err(`[worker] the erasure did not run: ${messageOf(error)}`)
