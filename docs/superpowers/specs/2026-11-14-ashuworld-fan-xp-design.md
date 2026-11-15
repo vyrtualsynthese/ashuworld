@@ -96,8 +96,8 @@ the ledger.
 
 | Component | Role |
 |---|---|
-| `web` | React + Vite single-page app. Public profile, ladder, account linking, admin views. Static, served by nginx. |
-| `api` | Fastify. OAuth login and linking, sessions, Dachi reads, admin actions, and the writes that Dachi actions produce: link, detach, penalty. |
+| `web` | React + Vite single-page app. Public profile, ladder, account linking, admin views (later milestone). Static, served by nginx. |
+| `api` | Fastify. OAuth login and linking, sessions, Dachi reads, admin actions (later milestone), and the writes that Dachi actions produce: link, detach, penalty. |
 | `worker` | Platform connectors (Twitch EventSub receiver + follower poller, Discord gateway), the awarding pipeline, outbox consumer, and the writes that platform events produce. |
 | `packages/ledger` | Domain rules and SQL: award, merge, detach, punishment, level. No HTTP, no platform code. |
 | `packages/providers` | One adapter per platform: identity, verified events, login. |
