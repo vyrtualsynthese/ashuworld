@@ -168,20 +168,24 @@ spec:
 Le modèle de pod d'un Job est immuable : on ne retire pas `--dry-run` sur un Job déjà créé, on le
 supprime et on en crée un autre. Chaque exécution est donc un Job neuf, sous le même nom.
 
+Enregistrer le bloc ci-dessus sous `droits-purge.yaml`, dans un répertoire de travail hors du
+dépôt : c'est le nom que les commandes suivantes passent à `kubectl apply -f`.
+
 ```bash
 # A. Répétition à blanc : lire les compteurs, ne rien supprimer.
 kubectl apply -n <namespace> -f droits-purge.yaml
-kubectl logs -f job/droits-purge-manuel -n <namespace>
+kubectl logs -f job/droits-purge-manuel -n <namespace> --pod-running-timeout=60s
 kubectl -n <namespace> delete job droits-purge-manuel
 
 # B. Exécution réelle : retirer --dry-run du manifeste, puis recréer le Job.
 kubectl apply -n <namespace> -f droits-purge.yaml
-kubectl logs -f job/droits-purge-manuel -n <namespace>
+kubectl logs -f job/droits-purge-manuel -n <namespace> --pod-running-timeout=60s
 kubectl -n <namespace> delete job droits-purge-manuel
 ```
 
 Pour une demande de droits, remplacer la commande par `export-fan`, `erase-fan`,
-`erase-identity` ou `erase-identity-id`.
+`erase-identity` ou `erase-identity-id`, **et retirer le `--dry-run` final** : aucune de ces
+quatre commandes ne le prend, et le Job échouerait sur son propre argument.
 
 Quand un CronJob existe, à l'origine ou après activation, avec le nom relevé :
 
@@ -199,7 +203,7 @@ kubectl create job --from=cronjob/$CRONJOB droits-2026-11-15 \
   | kubectl apply -n <namespace> -f -
 
 # 3. La sortie, puis le nettoyage.
-kubectl logs -f job/droits-2026-11-15 -n <namespace>
+kubectl logs -f job/droits-2026-11-15 -n <namespace> --pod-running-timeout=60s
 kubectl delete job droits-2026-11-15 -n <namespace>
 ```
 

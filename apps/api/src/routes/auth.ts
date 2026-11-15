@@ -237,7 +237,9 @@ async function resolveLogin(
     if (fanId === null) {
       // A detached identity the fan still owns is theirs to re-attach; an erased one has no
       // account left to return to, so the sign-in is a new start rather than a re-attach.
-      // This path returns before the refresh below, so the placeholder erasure wrote stays.
+      // This branch is only reached when the row is not erased, so it preserves no
+      // placeholder: the reason to stop here is that the row belongs to nobody until the fan
+      // confirms, and signing in would attach it to a fan of this route's choosing.
       if (!erased && row.first_linked_at !== null) return { kind: 'reattach' }
     }
 
@@ -417,9 +419,11 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       }
 
       // A login handshake issued before the consent gate carried no version. Creating a
-      // fan from it would record an account nobody accepted the terms for, so it is sent
-      // back to the start page to tick the box rather than completed. Checked before the
-      // exchange: a refused callback has no reason to spend the provider's code.
+      // fan from it would record an account nobody accepted the terms for, so the callback
+      // answers with a JSON 400 and the consent error rather than completing: the fan has to
+      // start a new login from the site with the box ticked, which this route does not do.
+      // Checked before the exchange: a refused callback has no reason to spend the
+      // provider's code.
       if (handshake.purpose === 'login' && handshake.termsVersion === null) {
         return reply.code(400).send(errorBody('consent_required', CONSENT_REQUIRED))
       }

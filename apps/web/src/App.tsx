@@ -60,22 +60,32 @@ function Layout() {
  * not rendered: it may hold anything, and it belongs in the console, where the router has
  * already put it.
  */
+/**
+ * The page an unexpected rendering error lands on.
+ *
+ * It carries the footer for the same reason every other page does: a visitor who reaches an
+ * error must still be able to find the publisher and the three legal documents, and the
+ * error page is exactly where someone might look for them.
+ */
 function RouteError() {
   // Read so the router marks the error as handled and does not log it twice; the value is
   // deliberately not rendered.
   useRouteError()
 
   return (
-    <main className="page">
-      <h1>Quelque chose s’est mal passé</h1>
-      <p>
-        Cette page n’a pas pu s’afficher. Rien de ce que tu as gagné n’est perdu : le
-        registre est tenu par le serveur, pas par cette page.
-      </p>
-      <Link className="button" to="/">
-        Aller à l’accueil
-      </Link>
-    </main>
+    <>
+      <main className="page">
+        <h1>Quelque chose s’est mal passé</h1>
+        <p>
+          Cette page n’a pas pu s’afficher. Rien de ce que tu as gagné n’est perdu : le
+          registre est tenu par le serveur, pas par cette page.
+        </p>
+        <Link className="button" to="/">
+          Aller à l’accueil
+        </Link>
+      </main>
+      <Footer />
+    </>
   )
 }
 
