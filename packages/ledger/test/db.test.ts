@@ -1,6 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Pool } from 'pg'
-import { attachIdleErrorHandler, createPool, withTransaction, type Queryable } from '../src/index.js'
+import {
+  POOL_CONNECT_TIMEOUT_MS,
+  POOL_IDLE_TIMEOUT_MS,
+  POOL_MAX_CLIENTS,
+  attachIdleErrorHandler,
+  createPool,
+  withTransaction,
+  type Queryable,
+} from '../src/index.js'
 import { createTestDb, type TestDb } from '@ashuworld/ledger/testing'
 
 function testDatabaseUrl(): string {
@@ -15,6 +23,17 @@ describe('createPool', () => {
     try {
       const { rows } = await pool.query<{ one: number }>('select 1 as one')
       expect(rows[0]?.one).toBe(1)
+    } finally {
+      await pool.end()
+    }
+  })
+
+  it('bounds connection wait and idle lifetime instead of queueing forever', async () => {
+    const pool = createPool(testDatabaseUrl())
+    try {
+      expect(pool.options.max).toBe(POOL_MAX_CLIENTS)
+      expect(pool.options.connectionTimeoutMillis).toBe(POOL_CONNECT_TIMEOUT_MS)
+      expect(pool.options.idleTimeoutMillis).toBe(POOL_IDLE_TIMEOUT_MS)
     } finally {
       await pool.end()
     }

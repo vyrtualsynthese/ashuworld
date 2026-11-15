@@ -10,8 +10,22 @@ export interface Queryable {
   query<R extends object = Record<string, unknown>>(text: string, values?: unknown[]): Promise<{ rows: R[] }>
 }
 
+/** Caps concurrent connections, so one busy process cannot starve Postgres of backends. */
+export const POOL_MAX_CLIENTS = 10
+
+/** Caps how long a query waits for a free connection, so a saturated pool fails instead of hanging. */
+export const POOL_CONNECT_TIMEOUT_MS = 5_000
+
+/** Reaps connections left unused, so an idle process stops holding Postgres backends. */
+export const POOL_IDLE_TIMEOUT_MS = 30_000
+
 export function createPool(url: string): Pool {
-  const pool = new pg.Pool({ connectionString: url })
+  const pool = new pg.Pool({
+    connectionString: url,
+    max: POOL_MAX_CLIENTS,
+    connectionTimeoutMillis: POOL_CONNECT_TIMEOUT_MS,
+    idleTimeoutMillis: POOL_IDLE_TIMEOUT_MS,
+  })
   attachIdleErrorHandler(pool)
   return pool
 }

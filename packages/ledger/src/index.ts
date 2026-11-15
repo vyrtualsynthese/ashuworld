@@ -1,4 +1,7 @@
 export {
+  POOL_CONNECT_TIMEOUT_MS,
+  POOL_IDLE_TIMEOUT_MS,
+  POOL_MAX_CLIENTS,
   attachIdleErrorHandler,
   createPool,
   isUniqueViolation,
