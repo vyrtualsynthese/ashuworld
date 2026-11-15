@@ -20,7 +20,13 @@ export {
   type IngestEventInput,
   type IngestOutcome,
 } from './award.js'
-export { ensureIdentity, findIdentityForLogin, type IdentityRef } from './identity.js'
+export {
+  ensureIdentity,
+  findIdentityForLogin,
+  refreshIdentityHandle,
+  type IdentityRef,
+  type LoginIdentityRef,
+} from './identity.js'
 export {
   InvalidMonthError,
   awardMonthly,
