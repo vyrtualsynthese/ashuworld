@@ -15,6 +15,7 @@
     "build": "tsc -b",
     "test": "vitest run --root ../.. --project @ashuworld/worker",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "twitch-authorize": "tsx src/twitchAuthorize.ts",
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
