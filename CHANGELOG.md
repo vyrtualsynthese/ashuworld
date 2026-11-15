@@ -29,6 +29,7 @@ the data is expected to be wiped before launch.
 
 - The public profile and the ladder no longer publish the account's database id.
 - The auth rate limit applies per route instead of over one shared counter.
+- The Postgres pool now fails a connection attempt after 5 seconds instead of waiting forever.
 
 ### Planned
 

@@ -10,13 +10,25 @@ export interface Queryable {
   query<R extends object = Record<string, unknown>>(text: string, values?: unknown[]): Promise<{ rows: R[] }>
 }
 
-/** Caps concurrent connections, so one busy process cannot starve Postgres of backends. */
+/**
+ * Caps concurrent connections per pool. This is `pg`'s own default, named here so the cap is
+ * visible rather than implied. The pool is per process, and api, worker, `migrate` and `purge`
+ * each own one, so the ceiling is 10 per process, not 10 for the whole deployment.
+ */
 export const POOL_MAX_CLIENTS = 10
 
-/** Caps how long a query waits for a free connection, so a saturated pool fails instead of hanging. */
+/**
+ * The one real tightening. `pg` defaults to 0, meaning wait forever, so a database that has gone
+ * away leaves the caller queued until something else times out. Five seconds makes a lost
+ * database fail fast instead.
+ */
 export const POOL_CONNECT_TIMEOUT_MS = 5_000
 
-/** Reaps connections left unused, so an idle process stops holding Postgres backends. */
+/**
+ * Deliberately looser than `pg`'s 10 s default: the periodic probes wake the pool often enough
+ * that reaping at 10 s would churn reconnects. Thirty seconds keeps connections across the gaps
+ * while still releasing them once a process really does go quiet. Per process, like the cap.
+ */
 export const POOL_IDLE_TIMEOUT_MS = 30_000
 
 export function createPool(url: string): Pool {

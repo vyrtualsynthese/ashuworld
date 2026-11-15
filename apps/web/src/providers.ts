@@ -2,8 +2,9 @@
  * The provider names this app knows how to render, and their display labels.
  *
  * The names come from `@ashuworld/providers` so the web and the api cannot drift. That
- * package is pure names plus a discovery payload parser and imports no server code, so
- * the browser bundle can take it as it is.
+ * package imports nothing at all and exports `PROVIDER_NAMES`, `discoveryEventId` and the
+ * discovery payload parser as well, but the browser bundle keeps only the provider guard:
+ * the discovery functions are tree-shaken, so no parser code ships to the browser.
  *
  * The app only ever *receives* a provider name in JSON, so the guard still matters here:
  * `?reattach=` carries a value the visitor controls, and an unknown one must be dropped
