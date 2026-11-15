@@ -87,18 +87,66 @@ kubectl get cronjob -n <namespace>
 Si aucun CronJob de purge n'apparaît, deux voies :
 
 - l'activer le temps de l'opération :
-  `helm upgrade <release> <chart> -n <namespace> --reuse-values --set purge.enabled=true`,
-  exécuter, puis remettre `purge.enabled` à `false`. C'est un changement de déploiement : il se
-  consigne, et il ne se fait qu'avec l'accord de l'exploitant ;
-- créer un Job autonome qui porte les trois réglages, chacun lu dans son Secret. Les noms viennent
-  des valeurs du chart : `postgres.secretName` et `postgres.urlKey` pour `DATABASE_URL`,
-  `erasure.pepperSecretName` et `erasure.pepperKey` pour `ERASURE_PEPPER`, `purge.secretName`
-  (ou le Secret que le chart crée, `<fullname>-purge`) et `purge.secretKey` pour `PURGE_CONFIRM`.
-  Les trois variables sont obligatoires : sans `DATABASE_URL` rien ne démarre, sans
-  `ERASURE_PEPPER` un effacement refuse, sans `PURGE_CONFIRM` la purge refuse. La valeur attendue
-  de `PURGE_CONFIRM` est `purge-ashuworld`.
+  `helm upgrade <release> <chart> -n <namespace> --reuse-values --set purge.enabled=true`.
+  **Relancer ensuite l'étape 1** (`kubectl get cronjob -n <namespace>`) : le nom du CronJob n'est
+  pas connu avant sa création, c'est ce second relevé qui le donne. Exécuter, puis remettre
+  `purge.enabled` à `false`. C'est un changement de déploiement : il se consigne, et il ne se fait
+  qu'avec l'accord de l'exploitant ;
+- créer un Job autonome, décrit ci-dessous. C'est la voie qui ne touche pas au déploiement.
 
-Avec le nom relevé à l'étape 1 :
+### Le Job autonome
+
+Il porte trois variables, chacune lue dans un Secret existant. Les noms viennent des valeurs du
+chart : ne pas les deviner, lire `helm get values <release> -n <namespace>` et recopier.
+
+| Variable | Valeur qui nomme le Secret | Valeur qui nomme la clé |
+|---|---|---|
+| `DATABASE_URL` | `postgres.secretName` | `postgres.urlKey` |
+| `ERASURE_PEPPER` | `erasure.pepperSecretName` | `erasure.pepperKey` |
+| `PURGE_CONFIRM` | `purge.secretName`, ou le Secret créé ci-dessous | `purge.secretKey`, ou `confirm` |
+
+`PURGE_CONFIRM` n'est pas une authentification : c'est une chaîne fixe, `purge-ashuworld`, qui
+arme la suppression. Le Secret qui la porte existe pour qu'une faute de frappe ne puisse pas
+lancer une purge, rien de plus. Le chart ne crée le sien que lorsque le CronJob est activé ; si
+aucun Secret ne porte déjà la valeur, en créer un, une fois, avec un nom explicite :
+
+```bash
+kubectl -n <namespace> create secret generic droits-purge-confirm \
+  --from-literal=confirm=purge-ashuworld
+```
+
+Puis appliquer ce Job. L'image est celle du worker (`worker.image.repository`, avec
+`worker.image.tag`, ou `image.tag` du chart quand le tag du worker est vide) ; elle tourne déjà en
+uid 10001, donc le Job est non-root sans `securityContext` supplémentaire.
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: droits-purge-manuel
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: purge
+          image: <worker.image.repository>:<worker.image.tag ou image.tag>
+          command: ["node", "dist/worker.js", "purge", "--dry-run"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: <postgres.secretName>, key: <postgres.urlKey> } }
+            - name: ERASURE_PEPPER
+              valueFrom: { secretKeyRef: { name: <erasure.pepperSecretName>, key: <erasure.pepperKey> } }
+            - name: PURGE_CONFIRM
+              valueFrom: { secretKeyRef: { name: <Secret de PURGE_CONFIRM>, key: <confirm ou purge.secretKey> } }
+```
+
+Le Job commence par `purge --dry-run` : lire les compteurs, puis retirer `--dry-run` et relancer.
+Pour une demande de droits, remplacer la commande par `export-fan`, `erase-fan`,
+`erase-identity` ou `erase-identity-id`.
+
+Quand un CronJob existe, à l'origine ou après activation, avec le nom relevé :
 
 ```bash
 # 2. Un Job ponctuel dérivé du CronJob, commande remplacée, appliqué sans passer par un fichier.
