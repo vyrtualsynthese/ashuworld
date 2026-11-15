@@ -4,6 +4,7 @@ import type { GameConfig } from '@ashuworld/gameconfig'
 import type { IdentityProfile } from '@ashuworld/providers'
 import {
   ensureIdentity,
+  erasedExternalId,
   findIdentityForLogin,
   linkIdentity,
   recordTermsAcceptance,
@@ -179,9 +180,11 @@ type LinkOutcome =
  * signs into it. `ensureIdentity` alone does not give that, because it only serialises the
  * identity insert, not the fan lookup that follows.
  *
- * The provider's current handle is written on every match, erased or not, so a fan who
- * renamed on the provider is not shown a stale name. `ensureIdentity` used to do that as a
- * side effect of its upsert; a matched row is only read here, so the refresh is explicit.
+ * The provider's current handle is written on every matched row whose sign-in goes on to a
+ * session or an attach, so a fan who renamed on the provider is not shown a stale name.
+ * `ensureIdentity` used to do that as a side effect of its upsert; a matched row is only read
+ * here, so the refresh is explicit. A row sent to re-attach is not refreshed: it belongs to
+ * nobody at that moment, and the handle it holds is the fan's own to confirm.
  *
  * `termsVersion` is the document version the browser rendered and the fan accepted. It is
  * written on the fan's first acceptance only (`recordTermsAcceptance` refuses to overwrite),
@@ -202,8 +205,12 @@ async function resolveLogin(
     })
     const identityId = match?.id ?? (await ensureIdentity(tx, profile)).id
 
-    const { rows } = await tx.query<{ fan_id: string | null; first_linked_at: Date | null }>(
-      `select fan_id, first_linked_at
+    const { rows } = await tx.query<{
+      fan_id: string | null
+      first_linked_at: Date | null
+      external_id: string
+    }>(
+      `select fan_id, first_linked_at, external_id
          from provider_identities
         where id = $1
         for update`,
@@ -214,14 +221,31 @@ async function resolveLogin(
       throw new Error(`resolveLogin: provider identity ${identityId} vanished while it was locked`)
     }
 
-    await refreshIdentityHandle(tx, identityId, profile.displayHandle)
+    // Decided on the locked row, never on the lookup that found it: `eraseFan` can commit
+    // between `findIdentityForLogin` and this lock, and then the row is detached, carries the
+    // pseudonym and holds the neutral placeholder while the lookup still says "live". Reading
+    // the flag here makes that window invisible instead of sending an erased account to the
+    // re-attach dead end and restoring its real handle on a pseudonymous row.
+    const expectedPseudonym = erasedExternalId(
+      deps.env.ERASURE_PEPPER,
+      profile.provider,
+      profile.externalId,
+    )
+    const erased = row.external_id === expectedPseudonym
 
     let fanId = row.fan_id
     if (fanId === null) {
       // A detached identity the fan still owns is theirs to re-attach; an erased one has no
       // account left to return to, so the sign-in is a new start rather than a re-attach.
-      if (match?.erased !== true && row.first_linked_at !== null) return { kind: 'reattach' }
+      // This path returns before the refresh below, so the placeholder erasure wrote stays.
+      if (!erased && row.first_linked_at !== null) return { kind: 'reattach' }
+    }
 
+    // Only a matched row that leads somewhere is refreshed: a session or an attach. A
+    // just-created identity already carries the handle from `ensureIdentity`'s insert.
+    if (match !== null) await refreshIdentityHandle(tx, identityId, profile.displayHandle)
+
+    if (fanId === null) {
       const fan = await createFanWithUniqueHandle(tx, {
         displayHandle: profile.displayHandle,
         displayName: profile.displayName,
