@@ -168,6 +168,8 @@ describe('runCli', () => {
 
     expect(code).toBe(1)
     expect(err.lines.join('\n')).toContain('truncate')
+    // The help lists every command, including the one that resolves an ambiguous erasure.
+    expect(err.lines.join('\n')).toContain('erase-identity-id')
     expect(connect).not.toHaveBeenCalled()
     expect(query).not.toHaveBeenCalled()
   })

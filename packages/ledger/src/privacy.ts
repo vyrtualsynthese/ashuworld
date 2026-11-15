@@ -401,6 +401,14 @@ export async function exportFan(tx: Queryable, handle: string): Promise<FanExpor
  * transaction `eraseFan` insists on. The handle is normalised the same way
  * `getFanByHandle` does, so a typed `Ashu` still finds the account, and an erased one is
  * `null`: there is no person left to erase again.
+ *
+ * The handle→id mapping is a snapshot, not a reservation. Display handles are renameable
+ * on the provider side, so between this read and the erase the row can stop carrying the
+ * handle the operator typed: the command erases the account that held that handle at the
+ * moment of the lookup, which is the account the operator meant when they started, and a
+ * rename in that gap means the next run of the same handle names whoever holds it now.
+ * Nothing is locked on purpose, because locking a fans row to hold a handle steady would
+ * block the sign-in that renames it.
  */
 export async function findActiveFanId(tx: Queryable, handle: string): Promise<string | null> {
   const normalised = handle.trim().toLowerCase()
