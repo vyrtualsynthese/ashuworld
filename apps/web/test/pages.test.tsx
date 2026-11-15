@@ -425,15 +425,22 @@ describe('Account, signed out', () => {
 
     renderPage(<Account />, '/account')
 
+    // The age and terms tick is what unlocks a login link, so accept it first.
+    await userEvent.click(
+      await screen.findByRole('checkbox', {
+        name: 'J’ai 15 ans ou plus et j’accepte les CGU et la politique de confidentialité',
+      }),
+    )
+
     // One button per door the api runs, in the api's order, and nothing else: Discord is
     // not configured here, so no Discord button may appear.
     expect(await screen.findByRole('link', { name: /Twitch/i })).toHaveAttribute(
       'href',
-      '/auth/twitch/start?purpose=login',
+      '/auth/twitch/start?purpose=login&accept=2026-11-14',
     )
     expect(screen.getByRole('link', { name: /dev/i })).toHaveAttribute(
       'href',
-      '/auth/dev/start?purpose=login',
+      '/auth/dev/start?purpose=login&accept=2026-11-14',
     )
     expect(screen.queryByRole('link', { name: /Discord/i })).toBeNull()
   })
@@ -454,6 +461,12 @@ describe('Account, signed out', () => {
     mockFetch({ '/api/public/providers': { providers: ['twitch'] }, '/api/me': 401 })
 
     renderPage(<Account />, '/account')
+
+    await userEvent.click(
+      await screen.findByRole('checkbox', {
+        name: 'J’ai 15 ans ou plus et j’accepte les CGU et la politique de confidentialité',
+      }),
+    )
 
     expect(await screen.findByRole('link', { name: /Twitch/i })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /dev/i })).toBeNull()
@@ -647,9 +660,15 @@ describe('Account, signed in', () => {
 
     renderPage(<Account />, '/account')
 
+    await userEvent.click(
+      await screen.findByRole('checkbox', {
+        name: 'J’ai 15 ans ou plus et j’accepte les CGU et la politique de confidentialité',
+      }),
+    )
+
     expect(
       await screen.findByRole('link', { name: /compte de développement/i }),
-    ).toHaveAttribute('href', '/auth/dev/start?purpose=login')
+    ).toHaveAttribute('href', '/auth/dev/start?purpose=login&accept=2026-11-14')
     expect(screen.queryByText(/n’est pas activée/)).toBeNull()
     expect(screen.queryByRole('link', { name: /^Se connecter avec Twitch$/ })).toBeNull()
   })
