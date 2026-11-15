@@ -248,6 +248,8 @@ export function loadWorkerEnv(raw: NodeJS.ProcessEnv = process.env): WorkerEnv {
     twitchConfig.TWITCH_CLIENT_ID = twitchPair.id
     twitchConfig.TWITCH_CLIENT_SECRET = twitchPair.secret
   }
+  // The channel login and the refresh token are checked at activation, when the connector is
+  // listed, not at load: a complete client pair staged for a later rollout starts without them.
   const twitchChannelLogin = hasTwitch
     ? required(raw, 'TWITCH_CHANNEL_LOGIN')
     : optional(raw, 'TWITCH_CHANNEL_LOGIN')
