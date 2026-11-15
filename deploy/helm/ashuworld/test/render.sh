@@ -108,6 +108,13 @@ grep -A4 'name: ERASURE_PEPPER' <<<"$purge_job" | grep -q 'name: ashuworld-erasu
   fail "the purge CronJob does not read the erasure Secret"
 grep -A4 'name: PURGE_CONFIRM' <<<"$purge_job" | grep -q 'name: ashuworld-purge' ||
   fail "the purge CronJob does not reference its confirm Secret"
+# The Secret's *key* as well as its name: a ref naming the right Secret with the wrong key
+# mounts nothing, and the pass would exit at startup with an empty pepper. Anchored at the
+# end of the line, because a bare substring check accepts `key: peppered` for `key: pepper`.
+grep -A4 'name: ERASURE_PEPPER' <<<"$purge_job" | grep -Eq 'key: pepper[[:space:]]*$' ||
+  fail "the purge CronJob reads the wrong key from the erasure Secret"
+grep -A4 'name: PURGE_CONFIRM' <<<"$purge_job" | grep -Eq 'key: confirm[[:space:]]*$' ||
+  fail "the purge CronJob reads the wrong key from its confirm Secret"
 
 # --- secrets stay in Secrets ---------------------------------------------------------
 
