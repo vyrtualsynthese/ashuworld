@@ -292,7 +292,7 @@ async function stateOfStart(app: FastifyInstance, url: string): Promise<string> 
 
 /** A whole login through the injected Twitch door, ending at the callback. */
 async function twitchLogin(app: FastifyInstance): Promise<Injected> {
-  const state = await stateOfStart(app, '/auth/twitch/start?purpose=login')
+  const state = await stateOfStart(app, '/auth/twitch/start?purpose=login&accept=2026-11-14')
   return callback(app, { state, code: 'grant-1', provider: 'twitch' })
 }
 

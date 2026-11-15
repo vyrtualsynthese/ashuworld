@@ -8,6 +8,7 @@ import { loadEnv } from '../src/config.js'
 const base = {
   DATABASE_URL: 'postgres://ashu:ashu@localhost:5432/ashu',
   PUBLIC_BASE_URL: 'https://ashu.example',
+  ERASURE_PEPPER: 'test-pepper',
 }
 
 /** Runs `loadEnv` expecting it to refuse, and hands back the error it threw. */
