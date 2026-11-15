@@ -162,12 +162,18 @@ export async function eraseFan(
   )
 
   for (const identity of identities.rows) {
+    // Re-erasing a returning account: the row was detached by the first erasure with its
+    // pseudonym in place, and a sign-in re-linked it without restoring the raw provider id.
+    // Hashing the pseudonym again would store a second, different ciphertext, and the next
+    // sign-in would no longer match it: a new identity row, and a welcome bonus paid twice.
+    // An id that already carries `erased:` is therefore left exactly as the first pass wrote
+    // it; the detach, the placeholder and the forfeit still run.
     await tx.query(
       `update provider_identities
-          set external_id = $2,
-              display_handle = 'Compte supprimé',
+          set display_handle = 'Compte supprimé',
               fan_id = null,
-              linked_at = null
+              linked_at = null,
+              external_id = case when external_id like 'erased:%' then external_id else $2 end
         where id = $1`,
       [identity.id, erasedExternalId(input.pepper, identity.provider, identity.external_id)],
     )

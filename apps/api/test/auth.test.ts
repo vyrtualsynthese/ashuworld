@@ -283,6 +283,22 @@ async function identityRow(externalId: string): Promise<IdentityRow> {
   return row
 }
 
+/**
+ * The provider id a row by id stores.
+ *
+ * After an erasure that is the pseudonym, which is what the next sign-in is matched
+ * against, so a test that erases twice has to read it rather than recompute it.
+ */
+async function externalIdById(id: string): Promise<string> {
+  const { rows } = await db.pool.query<{ external_id: string }>(
+    'select external_id from provider_identities where id = $1',
+    [id],
+  )
+  const row = rows[0]
+  if (row === undefined) throw new Error(`no identity ${id}`)
+  return row.external_id
+}
+
 /** The same row read by id, for a test that no longer knows its provider id. */
 async function identityById(id: string): Promise<IdentityRow> {
   const { rows } = await db.pool.query<IdentityRow>(
@@ -952,6 +968,67 @@ describe('returning erased account', () => {
         }),
       )
       expect(again).toMatchObject({ awarded: false, reason: 'action_spent' })
+    })
+  })
+
+  it('re-erases an identity without hashing the pseudonym again', async () => {
+    // Deleted, back, deleted again, back once more. The second erasure must leave the stored
+    // pseudonym exactly as the first pass wrote it: hashing the pseudonym would store another
+    // ciphertext, the third sign-in would no longer match it, and the returning fan would get
+    // a second identity row and a second welcome bonus.
+    await withApp(async (app) => {
+      const fanId = await seedFan('ada')
+      await seedDevIdentity(fanId, 'ada')
+      const identity = await identityRow('dev:ada')
+      await withTransaction(db.pool, (tx) =>
+        awardOnce(tx, {
+          identityId: identity.id,
+          provider: 'dev',
+          actionKey: 'dev.login',
+          amount: 50,
+          idempotencyKey: 'dev-earn-ada',
+          cfg,
+        }),
+      )
+
+      await withTransaction(db.pool, (tx) => eraseFan(tx, { fanId, pepper: 'test-pepper' }))
+      const pseudonym = await externalIdById(identity.id)
+      expect(pseudonym.startsWith('erased:')).toBe(true)
+
+      const second = await login(app, 'ada')
+      expect(second.res.statusCode).toBe(302)
+      expect(locationOf(second.res)).toBe('/account')
+      const secondFanId = await fanIdByHandle('ada')
+      expect(secondFanId).not.toBe(fanId)
+      // The sign-in keeps the pseudonym: it matched the row through it, and it never
+      // stores the raw provider id again.
+      expect(await externalIdById(identity.id)).toBe(pseudonym)
+
+      await withTransaction(db.pool, (tx) =>
+        eraseFan(tx, { fanId: secondFanId, pepper: 'test-pepper' }),
+      )
+      expect(await externalIdById(identity.id)).toBe(pseudonym)
+      expect((await identityById(identity.id)).fan_id).toBeNull()
+
+      const third = await login(app, 'ada')
+      expect(third.res.statusCode).toBe(302)
+      expect(locationOf(third.res)).toBe('/account')
+      const thirdFanId = await fanIdByHandle('ada')
+      expect(thirdFanId).not.toBe(secondFanId)
+      expect(await count('provider_identities')).toBe(1)
+      expect((await identityById(identity.id)).fan_id).toBe(thirdFanId)
+
+      const replay = await withTransaction(db.pool, (tx) =>
+        awardOnce(tx, {
+          identityId: identity.id,
+          provider: 'dev',
+          actionKey: 'dev.login',
+          amount: 50,
+          idempotencyKey: 'dev-earn-ada-third',
+          cfg,
+        }),
+      )
+      expect(replay).toMatchObject({ awarded: false, reason: 'action_spent' })
     })
   })
 })
