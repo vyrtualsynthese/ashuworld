@@ -79,6 +79,8 @@ export {
   eraseIdentity,
   erasedExternalId,
   exportFan,
+  findActiveFanId,
+  findIdentityIdsByHandle,
   purgeBatch,
   type EraseFanResult,
   type EraseIdentityResult,

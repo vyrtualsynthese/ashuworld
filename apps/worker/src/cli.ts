@@ -1,8 +1,13 @@
 import type { Pool } from 'pg'
 import {
   ALPHA_RESET_CONFIRM_ENV,
+  ERASURE_PEPPER_ENV,
+  eraseFan,
+  exportFan,
+  findActiveFanId,
   recomputeLevels,
   resetAlpha,
+  withTransaction,
 } from '@ashuworld/ledger'
 import type { Connector } from './connectors/types.js'
 import { DEFAULT_SYNC_INTERVAL_SECONDS } from './config.js'
@@ -63,6 +68,28 @@ function loadConfigVersion(): string {
 }
 
 /**
+ * `ERASURE_PEPPER` or a refusal.
+ *
+ * Read by the erasure commands only, never at startup: a worker that merely drains the
+ * queue has no business holding the secret that anonymises provider ids, and a deployment
+ * without it must still start.
+ *
+ * Empty is missing for the same reason as everywhere else in this process, and the
+ * message names the variable so an operator reading a failed job knows what to set.
+ */
+function loadPepper(): string {
+  const pepper = process.env[ERASURE_PEPPER_ENV]
+  if (pepper === undefined || pepper.trim() === '') {
+    throw new Error(
+      `${ERASURE_PEPPER_ENV} is required to erase an account but was not set; ` +
+        'the erasure is refused so it cannot run without the secret that anonymises the ' +
+        'provider ids',
+    )
+  }
+  return pepper.trim()
+}
+
+/**
  * The command line, as `process.argv.slice(2)`.
  *
  * `argv` is passed in rather than read here so the dispatch is testable: the tests call
@@ -75,6 +102,9 @@ function loadConfigVersion(): string {
  *   raise whatever the table now puts higher. It reads `GAME_CONFIG_VERSION` from the
  *   file it loads (the api's file), not from the environment, because the pass needs the
  *   thresholds themselves and the version is only what it reports;
+ * - `export-fan <handle>`: print one account's ledger history as JSON, for the person who
+ *   asked to receive it;
+ * - `erase-fan <handle>`: anonymise one account in place, guarded by `ERASURE_PEPPER`;
  * - anything else, including extra arguments after a command: a refusal with a non-zero
  *   exit code. There is deliberately no `--force`: a destructive command should not have
  *   a flag that removes its own guard.
@@ -142,11 +172,73 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
     }
   }
 
+  if (argv[0] === 'export-fan') {
+    if (argv.length !== 2) {
+      err(
+        `[worker] "export-fan" takes exactly one handle, but got ` +
+          `${JSON.stringify(argv.slice(1))}; it exports the account that handle names and ` +
+          'nothing else',
+      )
+      return 1
+    }
+
+    // `argv[1]` is the handle; the length check above is what makes it present.
+    const handle = argv[1] as string
+    try {
+      const document = await withTransaction(deps.pool, (tx) => exportFan(tx, handle))
+      if (document === null) {
+        err(`[worker] no active account has that handle: ${handle}`)
+        return 1
+      }
+      out(JSON.stringify(document, null, 2))
+      return 0
+    } catch (error) {
+      err(`[worker] the export did not run: ${messageOf(error)}`)
+      return 1
+    }
+  }
+
+  if (argv[0] === 'erase-fan') {
+    if (argv.length !== 2) {
+      err(
+        `[worker] "erase-fan" takes exactly one handle, but got ` +
+          `${JSON.stringify(argv.slice(1))}; it erases the account that handle names and ` +
+          'nothing else',
+      )
+      return 1
+    }
+
+    const handle = argv[1] as string
+    try {
+      const pepper = loadPepper()
+      // The id is read first because `eraseFan` refuses to run outside a transaction, and
+      // the account may be gone by the time the erase opens one: the helper it calls
+      // re-checks `erased_at`, so a concurrent erasure is answered as a no-op rather
+      // than resurrected.
+      const fanId = await withTransaction(deps.pool, (tx) => findActiveFanId(tx, handle))
+      if (fanId === null) {
+        err(`[worker] no active account has that handle: ${handle}`)
+        return 1
+      }
+      const result = await withTransaction(deps.pool, (tx) => eraseFan(tx, { fanId, pepper }))
+      out(
+        `[worker] account erasure complete: identities ${result.identities}, ` +
+          `forfeitedEntries ${result.forfeitedEntries}; ` +
+          (result.erased ? 'the account is erased' : 'it was already erased, so nothing changed'),
+      )
+      return 0
+    } catch (error) {
+      err(`[worker] the erasure did not run: ${messageOf(error)}`)
+      return 1
+    }
+  }
+
   if (argv[0] !== 'reset') {
     err(
       `[worker] unknown argument "${argv[0]}"; run the worker with no argument to drain ` +
-        'the queue, with "reset" to wipe all xp for alpha, or with "recompute-levels" ' +
-        'to apply the current level table',
+        'the queue, with "reset" to wipe all xp for alpha, with "recompute-levels" ' +
+        'to apply the current level table, with "export-fan <handle>" to print one ' +
+        'account, or with "erase-fan <handle>" to erase one account',
     )
     return 1
   }
