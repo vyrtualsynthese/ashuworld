@@ -395,6 +395,49 @@ export async function exportFan(tx: Queryable, handle: string): Promise<FanExpor
 }
 
 /**
+ * The id of the active account behind a handle, or `null`.
+ *
+ * A read-only lookup for the erasure command, which needs the id before it opens the
+ * transaction `eraseFan` insists on. The handle is normalised the same way
+ * `getFanByHandle` does, so a typed `Ashu` still finds the account, and an erased one is
+ * `null`: there is no person left to erase again.
+ */
+export async function findActiveFanId(tx: Queryable, handle: string): Promise<string | null> {
+  const normalised = handle.trim().toLowerCase()
+  const { rows } = await tx.query<{ id: string }>(
+    `select id
+       from fans
+      where handle = $1
+        and erased_at is null`,
+    [normalised],
+  )
+  return rows[0]?.id ?? null
+}
+
+/**
+ * Every identity that still carries a provider display handle.
+ *
+ * 0, 1 or many: a display handle is not unique on either platform side (someone renames
+ * themselves and a new account takes the name; a Twitch login and a YouTube handle can
+ * read the same). This returns all of them and leaves the decision to the caller, which
+ * is what lets the CLI refuse an ambiguous request instead of erasing the wrong person.
+ */
+export async function findIdentityIdsByHandle(
+  tx: Queryable,
+  input: { provider: ProviderName; displayHandle: string },
+): Promise<string[]> {
+  const { rows } = await tx.query<{ id: string }>(
+    `select id
+       from provider_identities
+      where provider = $1
+        and display_handle = $2
+      order by id`,
+    [input.provider, input.displayHandle],
+  )
+  return rows.map((row) => row.id)
+}
+
+/**
  * How long an untouched account is kept before its personal data is erased.
  *
  * Three years: long enough that a fan who steps away for a season still finds their
