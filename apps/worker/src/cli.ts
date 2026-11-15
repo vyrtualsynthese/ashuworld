@@ -14,7 +14,7 @@ import {
   resetAlpha,
   withTransaction,
 } from '@ashuworld/ledger'
-import { isProviderName } from '@ashuworld/providers'
+import { PROVIDER_NAMES, isProviderName } from '@ashuworld/providers'
 import type { Connector } from './connectors/types.js'
 import { DEFAULT_SYNC_INTERVAL_SECONDS } from './config.js'
 import { createDiscoveryEnqueue, runDiscovery } from './discovery.js'
@@ -96,6 +96,22 @@ function loadPepper(): string {
 }
 
 /**
+ * The shape of a `provider_identities.id`: a canonical UUID.
+ *
+ * The same check the api makes before a lookup, repeated here because the worker does not
+ * depend on the api. The column is a uuid, so handing Postgres `not-a-uuid` raises a syntax
+ * error in a transaction that has already been opened; a caller-chosen string that cannot
+ * name a row is refused before anything connects, which is why a malformed id touches
+ * nothing.
+ */
+const IDENTITY_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isIdentityId(value: string): boolean {
+  return IDENTITY_ID_PATTERN.test(value)
+}
+
+/**
  * `PURGE_CONFIRM` or a refusal, in the alpha reset's three sentences.
  *
  * Absent, blank and wrong each get their own line for the same reason the reset does: an
@@ -146,6 +162,8 @@ function requirePurgeConfirmation(): void {
  * - `erase-identity <provider> <displayHandle>`: anonymise one provider account that never
  *   joined a fan account, guarded by `ERASURE_PEPPER`, and only when the handle names
  *   exactly one identity;
+ * - `erase-identity-id <uuid>`: the same erasure for the operator whose handle named
+ *   several identities, addressed by the id the ambiguous refusal printed;
  * - `purge [--dry-run]`: apply the retention windows, guarded by `PURGE_CONFIRM`. The dry
  *   run selects and counts but writes nothing; the real run repeats the batch until a pass
  *   has no fan or identity left to erase, because each batch is capped;
@@ -261,7 +279,11 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
       // than resurrected.
       const fanId = await withTransaction(deps.pool, (tx) => findActiveFanId(tx, handle))
       if (fanId === null) {
-        err(`[worker] no active account has that handle: ${handle}`)
+        err(
+          `[worker] no active account has that handle: ${handle}; an erased account no longer ` +
+            'answers to its old handle, so a re-run of an erasure ends here rather than in a ' +
+            'typo',
+        )
         return 1
       }
       const result = await withTransaction(deps.pool, (tx) => eraseFan(tx, { fanId, pepper }))
@@ -291,8 +313,8 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
     const displayHandle = argv[2] as string
     if (!isProviderName(provider)) {
       err(
-        `[worker] unknown provider "${provider}"; "erase-identity" accepts twitch, youtube, ` +
-          'discord or dev',
+        `[worker] unknown provider "${provider}"; "erase-identity" accepts ` +
+          PROVIDER_NAMES.join(', '),
       )
       return 1
     }
@@ -312,12 +334,56 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
       if (identityIds.length > 1) {
         err(
           `[worker] ${identityIds.length} identities share that provider and handle, so the ` +
-            `request is ambiguous; erase the one meant by id: ${identityIds.join(', ')}`,
+            'request is ambiguous; run "erase-identity-id" with the id of the one meant: ' +
+            identityIds.join(', '),
         )
         return 1
       }
 
       const identityId = identityIds[0] as string
+      const result = await withTransaction(deps.pool, (tx) =>
+        eraseIdentity(tx, { identityId, pepper }),
+      )
+      out(
+        `[worker] identity erasure complete: erased ${result.erased}, ` +
+          `forfeitedEntries ${result.forfeitedEntries}; ` +
+          (result.erased
+            ? 'the identity is erased'
+            : 'it was already erased, so nothing changed'),
+      )
+      return 0
+    } catch (error) {
+      err(`[worker] the erasure did not run: ${messageOf(error)}`)
+      return 1
+    }
+  }
+
+  if (argv[0] === 'erase-identity-id') {
+    if (argv.length !== 2) {
+      err(
+        `[worker] "erase-identity-id" takes exactly one identity id, but got ` +
+          `${JSON.stringify(argv.slice(1))}; it erases the row that id names and nothing else`,
+      )
+      return 1
+    }
+
+    const identityId = argv[1] as string
+    // Checked before the pepper and before any connection: a string that cannot be a uuid
+    // would make Postgres raise a syntax error inside an open transaction, and the refusal
+    // has to leave the database untouched.
+    if (!isIdentityId(identityId)) {
+      err(
+        `[worker] "${identityId}" is not an identity id; "erase-identity-id" takes the ` +
+          'canonical uuid the ambiguous "erase-identity" refusal prints',
+      )
+      return 1
+    }
+
+    try {
+      const pepper = loadPepper()
+      // The ledger owns the refusals that need the row: a missing id and an identity that
+      // is still attached to a fan account both come back from here as errors, so this
+      // branch never has to guess whether the row exists.
       const result = await withTransaction(deps.pool, (tx) =>
         eraseIdentity(tx, { identityId, pepper }),
       )
@@ -397,7 +463,8 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
         'the queue, with "reset" to wipe all xp for alpha, with "recompute-levels" ' +
         'to apply the current level table, with "export-fan <handle>" to print one ' +
         'account, with "erase-fan <handle>" to erase one account, with ' +
-        '"erase-identity <provider> <handle>" to erase one never-linked identity, or ' +
+        '"erase-identity <provider> <handle>" to erase one never-linked identity, with ' +
+        '"erase-identity-id <uuid>" to erase a specific never-linked identity, or ' +
         'with "purge [--dry-run]" to apply the retention windows',
     )
     return 1

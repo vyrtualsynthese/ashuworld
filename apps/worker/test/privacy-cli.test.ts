@@ -359,6 +359,110 @@ describe('runCli privacy commands', () => {
     expect(printed).toContain(leftId)
     expect(printed).toContain(rightId)
     expect(printed).toContain('ambiguous')
+    // The refusal has to name a command that exists, or the operator is stuck.
+    expect(printed).toContain('erase-identity-id')
+
+    // The id it printed is the way out: one row erased, the neighbour untouched.
+    const out = capture()
+    const resolved = await runCli(['erase-identity-id', leftId], {
+      pool: db.pool,
+      processors: new Map(),
+      out: out.write,
+      err: capture().write,
+    })
+
+    expect(resolved).toBe(0)
+    const resolution = out.lines.join('\n')
+    expect(resolution).toContain('erased true')
+    expect(resolution).toContain('forfeitedEntries 1')
+
+    const { rows } = await db.pool.query<{ external_id: string }>(
+      'select external_id from provider_identities order by external_id',
+    )
+    const erased = rows.filter((row) => row.external_id.startsWith('erased:'))
+    expect(erased).toHaveLength(1)
+    // The erasure rewrites `external_id` in place, so the surviving handle still says
+    // which of the two rows was left alone.
+    const { rows: handles } = await db.pool.query<{ display_handle: string }>(
+      'select display_handle from provider_identities',
+    )
+    expect(handles.map((row) => row.display_handle).sort()).toEqual([
+      'Compte supprimé',
+      'same',
+    ])
+    expect(erased[0]?.external_id.startsWith('erased:')).toBe(true)
+  })
+
+  it.each([
+    ['not-a-uuid'],
+    ['00000000-0000-0000-0000-00000000000'],
+    ['11111111-1111-1111-1111-111111111111-extra'],
+  ])('refuses "erase-identity-id" for %j without touching the database', async (bad) => {
+    const connect = vi.fn()
+    const query = vi.fn()
+    const err = capture()
+
+    const code = await runCli(['erase-identity-id', bad], {
+      pool: { connect, query } as unknown as Pool,
+      processors: new Map(),
+      out: capture().write,
+      err: err.write,
+    })
+
+    expect(code).toBe(1)
+    expect(connect).not.toHaveBeenCalled()
+    expect(query).not.toHaveBeenCalled()
+    expect(err.lines.join('\n')).toContain('is not an identity id')
+  })
+
+  it('refuses "erase-identity-id" on an attached identity and changes nothing', async () => {
+    await seedAccount()
+    process.env[ERASURE_PEPPER_ENV] = PEPPER
+    const { rows: seeded } = await db.pool.query<{ id: string }>(
+      'select id from provider_identities',
+    )
+    const attachedId = first(seeded).id
+    const out = capture()
+    const err = capture()
+
+    const code = await runCli(['erase-identity-id', attachedId], {
+      pool: db.pool,
+      processors: new Map(),
+      out: out.write,
+      err: err.write,
+    })
+
+    expect(code).toBe(1)
+    expect(out.lines).toEqual([])
+    expect(err.lines.join('\n')).toContain('still attached')
+    const { rows } = await db.pool.query<{ external_id: string; display_handle: string }>(
+      'select external_id, display_handle from provider_identities',
+    )
+    expect(rows[0]).toMatchObject({ external_id: 'ext-1', display_handle: 'ada' })
+  })
+
+  it.each([
+    ['erase-identity', 'twitch', 'ghost'],
+    ['purge'],
+  ])('refuses %j without ERASURE_PEPPER and changes nothing', async (...args: string[]) => {
+    // The purge row is armed first, so it reaches the pepper rather than the confirmation
+    // and the assertion below is about the variable it claims to be about.
+    armPurge()
+    const connect = vi.fn()
+    const query = vi.fn()
+    const err = capture()
+
+    const code = await runCli(args, {
+      pool: { connect, query } as unknown as Pool,
+      processors: new Map(),
+      out: capture().write,
+      err: err.write,
+    })
+
+    expect(code).toBe(1)
+    expect(connect).not.toHaveBeenCalled()
+    expect(query).not.toHaveBeenCalled()
+    expect(err.lines.join('\n')).toContain(ERASURE_PEPPER_ENV)
   })
 
   it('refuses "erase-identity" for an unknown provider before touching the database', async () => {
@@ -512,6 +616,8 @@ describe('runCli privacy commands', () => {
     ['erase-identity'],
     ['erase-identity', 'twitch'],
     ['erase-identity', 'twitch', 'ada', 'extra'],
+    ['erase-identity-id'],
+    ['erase-identity-id', 'abc', 'extra'],
     ['purge', '--force'],
     ['purge', '--dry-run', 'extra'],
   ])('refuses %j without touching the database', async (...args: string[]) => {

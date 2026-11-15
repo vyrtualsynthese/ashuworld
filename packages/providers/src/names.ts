@@ -7,8 +7,14 @@ export interface IdentityProfile {
   displayName: string
 }
 
-const PROVIDERS: readonly ProviderName[] = ['twitch', 'youtube', 'discord', 'dev']
+/**
+ * Every provider this build accepts, in the order a message should list them.
+ *
+ * Exported so a refusal can name the same set `isProviderName` accepts instead of a
+ * hand-written sentence that drifts the moment a provider is added.
+ */
+export const PROVIDER_NAMES: readonly ProviderName[] = ['twitch', 'youtube', 'discord', 'dev']
 
 export function isProviderName(value: string): value is ProviderName {
-  return (PROVIDERS as readonly string[]).includes(value)
+  return (PROVIDER_NAMES as readonly string[]).includes(value)
 }
