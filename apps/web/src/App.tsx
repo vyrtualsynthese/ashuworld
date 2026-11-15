@@ -52,16 +52,13 @@ function Layout() {
 }
 
 /**
- * What a page shows when rendering it threw.
+ * The page an unexpected rendering error lands on.
  *
  * React Router catches the error before it reaches the browser's console-free white
  * screen, but its default page is developer copy. This one says the one thing a fan needs
  * to hear — nothing they earned is lost — and offers the way back. The error itself is
  * not rendered: it may hold anything, and it belongs in the console, where the router has
  * already put it.
- */
-/**
- * The page an unexpected rendering error lands on.
  *
  * It carries the footer for the same reason every other page does: a visitor who reaches an
  * error must still be able to find the publisher and the three legal documents, and the

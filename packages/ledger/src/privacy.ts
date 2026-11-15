@@ -110,10 +110,10 @@ export class IdentityAttachedError extends Error {
  *
  * The identity's provider id is replaced by a peppered hash: the row still stands for the
  * same provider account to anyone holding the raw id and the pepper, and stores nothing
- * that names it. Nothing reads that hash back today — the sign-in resolver that matches an
- * incoming provider id against it is the next task on this branch (Task 10) — so for now a
- * re-link happens by identity id. `linked_at` is cleared but `first_linked_at` is
- * deliberately not touched.
+ * that names it. `findIdentityForLogin` computes the same hash for an incoming provider
+ * account, so a returning account matches this row instead of being given a new one, and a
+ * second erasure keeps the stored hash rather than hashing it again. `linked_at` is cleared
+ * but `first_linked_at` is deliberately not touched.
  *
  * A second call is a no-op: the `erased_at is null` guard makes the anonymising update
  * match no row, and the function returns `erased: false` with zeros and no second audit row.
