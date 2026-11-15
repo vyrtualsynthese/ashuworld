@@ -2,13 +2,19 @@ import type { Pool } from 'pg'
 import {
   ALPHA_RESET_CONFIRM_ENV,
   ERASURE_PEPPER_ENV,
+  PURGE_CONFIRM_ENV,
+  PURGE_CONFIRM_VALUE,
   eraseFan,
+  eraseIdentity,
   exportFan,
   findActiveFanId,
+  findIdentityIdsByHandle,
+  purgeBatch,
   recomputeLevels,
   resetAlpha,
   withTransaction,
 } from '@ashuworld/ledger'
+import { isProviderName } from '@ashuworld/providers'
 import type { Connector } from './connectors/types.js'
 import { DEFAULT_SYNC_INTERVAL_SECONDS } from './config.js'
 import { createDiscoveryEnqueue, runDiscovery } from './discovery.js'
@@ -90,6 +96,38 @@ function loadPepper(): string {
 }
 
 /**
+ * `PURGE_CONFIRM` or a refusal, in the alpha reset's three sentences.
+ *
+ * Absent, blank and wrong each get their own line for the same reason the reset does: an
+ * operator reading a failed job needs to know which of the three happened, and "nothing
+ * was deleted" has to be true of every refusal. The check runs before the pepper and
+ * before any connection is taken, so a refused purge has touched nothing.
+ */
+function requirePurgeConfirmation(): void {
+  const raw = process.env[PURGE_CONFIRM_ENV]
+
+  if (raw === undefined) {
+    throw new Error(
+      `refusing the purge: ${PURGE_CONFIRM_ENV} is not set. ` +
+        `Set it to "${PURGE_CONFIRM_VALUE}" to arm the retention pass. Nothing was deleted.`,
+    )
+  }
+  if (raw.trim() === '') {
+    throw new Error(
+      `refusing the purge: ${PURGE_CONFIRM_ENV} is blank. ` +
+        `Set it to "${PURGE_CONFIRM_VALUE}" to arm the retention pass. Nothing was deleted.`,
+    )
+  }
+  if (raw !== PURGE_CONFIRM_VALUE) {
+    throw new Error(
+      `refusing the purge: ${PURGE_CONFIRM_ENV} does not match ` +
+        `"${PURGE_CONFIRM_VALUE}", so this looks like a typo rather than an operator ` +
+        'arming the retention pass. Nothing was deleted.',
+    )
+  }
+}
+
+/**
  * The command line, as `process.argv.slice(2)`.
  *
  * `argv` is passed in rather than read here so the dispatch is testable: the tests call
@@ -105,6 +143,12 @@ function loadPepper(): string {
  * - `export-fan <handle>`: print one account's ledger history as JSON, for the person who
  *   asked to receive it;
  * - `erase-fan <handle>`: anonymise one account in place, guarded by `ERASURE_PEPPER`;
+ * - `erase-identity <provider> <displayHandle>`: anonymise one provider account that never
+ *   joined a fan account, guarded by `ERASURE_PEPPER`, and only when the handle names
+ *   exactly one identity;
+ * - `purge [--dry-run]`: apply the retention windows, guarded by `PURGE_CONFIRM`. The dry
+ *   run selects and counts but writes nothing; the real run repeats the batch until a pass
+ *   has no fan or identity left to erase, because each batch is capped;
  * - anything else, including extra arguments after a command: a refusal with a non-zero
  *   exit code. There is deliberately no `--force`: a destructive command should not have
  *   a flag that removes its own guard.
@@ -233,12 +277,128 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
     }
   }
 
+  if (argv[0] === 'erase-identity') {
+    if (argv.length !== 3) {
+      err(
+        `[worker] "erase-identity" takes exactly a provider and a display handle, but got ` +
+          `${JSON.stringify(argv.slice(1))}; it erases one provider account that never ` +
+          'joined a fan account and nothing else',
+      )
+      return 1
+    }
+
+    const provider = argv[1] as string
+    const displayHandle = argv[2] as string
+    if (!isProviderName(provider)) {
+      err(
+        `[worker] unknown provider "${provider}"; "erase-identity" accepts twitch, youtube, ` +
+          'discord or dev',
+      )
+      return 1
+    }
+
+    try {
+      const pepper = loadPepper()
+      // A display handle is not unique on the platform side, so the lookup may answer with
+      // several ids. Reading them first lets this command refuse an ambiguous request
+      // instead of erasing whichever row happened to come back first.
+      const identityIds = await withTransaction(deps.pool, (tx) =>
+        findIdentityIdsByHandle(tx, { provider, displayHandle }),
+      )
+      if (identityIds.length === 0) {
+        err(`[worker] no identity matches that provider and handle: ${provider} ${displayHandle}`)
+        return 1
+      }
+      if (identityIds.length > 1) {
+        err(
+          `[worker] ${identityIds.length} identities share that provider and handle, so the ` +
+            `request is ambiguous; erase the one meant by id: ${identityIds.join(', ')}`,
+        )
+        return 1
+      }
+
+      const identityId = identityIds[0] as string
+      const result = await withTransaction(deps.pool, (tx) =>
+        eraseIdentity(tx, { identityId, pepper }),
+      )
+      out(
+        `[worker] identity erasure complete: erased ${result.erased}, ` +
+          `forfeitedEntries ${result.forfeitedEntries}; ` +
+          (result.erased
+            ? 'the identity is erased'
+            : 'it was already erased, so nothing changed'),
+      )
+      return 0
+    } catch (error) {
+      err(`[worker] the erasure did not run: ${messageOf(error)}`)
+      return 1
+    }
+  }
+
+  if (argv[0] === 'purge') {
+    const extra = argv.slice(1)
+    if (extra.length > 1 || (extra.length === 1 && extra[0] !== '--dry-run')) {
+      err(
+        `[worker] "purge" takes no argument or "--dry-run", but got ` +
+          `${JSON.stringify(extra)}; it is armed by ${PURGE_CONFIRM_ENV} alone, and there is ` +
+          'deliberately no --force',
+      )
+      return 1
+    }
+    const dryRun = extra.length === 1
+
+    try {
+      requirePurgeConfirmation()
+      const pepper = loadPepper()
+
+      if (dryRun) {
+        const counts = await purgeBatch(deps.pool, { pepper, dryRun: true })
+        out(
+          `[worker] purge dry run: fans ${counts.fans}, identities ${counts.identities}, ` +
+            `events ${counts.events}, audit ${counts.audit}; nothing was written`,
+        )
+        return 0
+      }
+
+      // Each batch is capped per erasure pass, so a backlog takes several. The loop ends on
+      // the first pass that erased no fan and no identity: every candidate is now handled,
+      // and another pass would only re-delete what the window holds.
+      let fans = 0
+      let identities = 0
+      let events = 0
+      let audit = 0
+      for (;;) {
+        const counts = await purgeBatch(deps.pool, { pepper, dryRun: false })
+        fans += counts.fans
+        identities += counts.identities
+        events += counts.events
+        audit += counts.audit
+        out(
+          `[worker] purge batch: fans ${counts.fans}, identities ${counts.identities}, ` +
+            `events ${counts.events}, audit ${counts.audit}`,
+        )
+        if (counts.fans + counts.identities === 0) break
+      }
+
+      out(
+        `[worker] purge complete: fans ${fans}, identities ${identities}, ` +
+          `events ${events}, audit ${audit}`,
+      )
+      return 0
+    } catch (error) {
+      err(`[worker] the purge did not run: ${messageOf(error)}`)
+      return 1
+    }
+  }
+
   if (argv[0] !== 'reset') {
     err(
       `[worker] unknown argument "${argv[0]}"; run the worker with no argument to drain ` +
         'the queue, with "reset" to wipe all xp for alpha, with "recompute-levels" ' +
         'to apply the current level table, with "export-fan <handle>" to print one ' +
-        'account, or with "erase-fan <handle>" to erase one account',
+        'account, with "erase-fan <handle>" to erase one account, with ' +
+        '"erase-identity <provider> <handle>" to erase one never-linked identity, or ' +
+        'with "purge [--dry-run]" to apply the retention windows',
     )
     return 1
   }

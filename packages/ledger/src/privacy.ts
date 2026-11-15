@@ -466,6 +466,17 @@ export const PROCESSED_EVENT_RETENTION_DAYS = 30
 /** How long the audit trail is kept, counted from the moment the row was written. */
 export const AUDIT_RETENTION_DAYS = 1095
 
+/** The environment variable the operator sets to arm the retention purge. */
+export const PURGE_CONFIRM_ENV = 'PURGE_CONFIRM'
+
+/**
+ * The one value the confirmation variable must hold.
+ *
+ * A typo is a refusal, not a purge, and the value names the instance so a confirmation
+ * copied from another environment's runbook does not arm this one by accident.
+ */
+export const PURGE_CONFIRM_VALUE = 'purge-ashuworld'
+
 /** What one purge pass removed. Counts only, in the same spirit as the erasure results. */
 export interface PurgeResult {
   /** Accounts this pass actually erased. */

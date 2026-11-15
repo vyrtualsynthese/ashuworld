@@ -75,6 +75,8 @@ export {
   IdentityNotFoundError,
   NEVER_LINKED_IDENTITY_RETENTION_DAYS,
   PROCESSED_EVENT_RETENTION_DAYS,
+  PURGE_CONFIRM_ENV,
+  PURGE_CONFIRM_VALUE,
   eraseFan,
   eraseIdentity,
   erasedExternalId,
