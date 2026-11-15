@@ -35,6 +35,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
 
 COPY tsconfig.base.json tsconfig.json ./
 COPY apps/web apps/web
+COPY packages/providers packages/providers
 
 # A production build has `import.meta.env.DEV === false`, so the dev door is off unless this
 # says otherwise. `false` is written out rather than left unset so the build is explicit.
