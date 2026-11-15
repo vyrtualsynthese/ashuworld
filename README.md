@@ -180,9 +180,12 @@ earn no follow XP until a poll sees them following.
 
 Keep `PLATFORM_TOKEN_KEY` stable once it has been used. The channel grant is stored sealed with
 it, so a different key cannot open that grant: the follower poll stops and the error names the
-variable. Running `twitch-authorize` again does not repair it while the old row exists, because a
-grant that will not open is never overwritten from the environment. Put the previous key back, or
-delete the `twitch` row in `platform_tokens` and authorize the channel again.
+variable. Running `twitch-authorize` again does not repair that on its own, because a grant that
+will not open is never overwritten from the environment. Put the previous key back, or reset the
+grant: delete the `twitch` row in `platform_tokens`, run `twitch-authorize`, paste the new
+`TWITCH_CHANNEL_REFRESH_TOKEN` into `.env`, and only then recreate the worker. The order matters:
+with the row gone, a worker recreated on the old token seals that stale token under the new key,
+the row opens, and the fresh token you pasted is ignored.
 
 ### Validate before pushing
 

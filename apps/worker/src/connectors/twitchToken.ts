@@ -157,7 +157,9 @@ async function refreshGrant(input: RefreshInput): Promise<RefreshedGrant> {
   if (!response.ok) {
     throw new Error(
       `Twitch refused the grant refresh with HTTP ${response.status}${detailOf(raw)}; ` +
-        'the channel owner may have revoked the app, so run twitch-authorize again',
+        'the channel owner may have revoked the app: delete the stored twitch row in ' +
+        'platform_tokens, run twitch-authorize, paste the new TWITCH_CHANNEL_REFRESH_TOKEN ' +
+        'into .env, then recreate the worker',
     )
   }
 
@@ -165,8 +167,9 @@ async function refreshGrant(input: RefreshInput): Promise<RefreshedGrant> {
   const accessToken = textOf(body?.['access_token'])
   if (accessToken === undefined) {
     throw new Error(
-      'Twitch answered the grant refresh without an access_token; ' +
-        'run twitch-authorize again to replace the grant',
+      'Twitch answered the grant refresh without an access_token; delete the stored twitch ' +
+        'row in platform_tokens, run twitch-authorize, paste the new ' +
+        'TWITCH_CHANNEL_REFRESH_TOKEN into .env, then recreate the worker',
     )
   }
 
