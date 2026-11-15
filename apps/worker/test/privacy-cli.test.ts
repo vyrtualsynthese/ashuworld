@@ -376,13 +376,20 @@ describe('runCli privacy commands', () => {
     expect(resolution).toContain('erased true')
     expect(resolution).toContain('forfeitedEntries 1')
 
-    const { rows } = await db.pool.query<{ external_id: string }>(
-      'select external_id from provider_identities order by external_id',
+    const { rows } = await db.pool.query<{ id: string; external_id: string }>(
+      'select id, external_id from provider_identities order by external_id',
     )
     const erased = rows.filter((row) => row.external_id.startsWith('erased:'))
     expect(erased).toHaveLength(1)
-    // The erasure rewrites `external_id` in place, so the surviving handle still says
+    // The named id is the one that changed: an implementation that erased the other row
+    // would leave `ext-left` here and pass every check above.
+    expect(erased[0]?.id).toBe(leftId)
+    // The erasure rewrites `external_id` in place, so the surviving `ext-right` still says
     // which of the two rows was left alone.
+    const surviving = rows.filter((row) => !row.external_id.startsWith('erased:'))
+    expect(surviving).toHaveLength(1)
+    expect(surviving[0]?.id).toBe(rightId)
+    expect(surviving[0]?.external_id).toBe('ext-right')
     const { rows: handles } = await db.pool.query<{ display_handle: string }>(
       'select display_handle from provider_identities',
     )
@@ -390,7 +397,6 @@ describe('runCli privacy commands', () => {
       'Compte supprimé',
       'same',
     ])
-    expect(erased[0]?.external_id.startsWith('erased:')).toBe(true)
   })
 
   it.each([
@@ -413,6 +419,51 @@ describe('runCli privacy commands', () => {
     expect(connect).not.toHaveBeenCalled()
     expect(query).not.toHaveBeenCalled()
     expect(err.lines.join('\n')).toContain('is not an identity id')
+  })
+
+  it('refuses "erase-identity-id" for a well-formed uuid that names no row and changes nothing', async () => {
+    const identityId = await seedFreeIdentity({ externalId: 'ext-keep', displayHandle: 'keep' })
+    process.env[ERASURE_PEPPER_ENV] = PEPPER
+    const out = capture()
+    const err = capture()
+
+    const code = await runCli(['erase-identity-id', '11111111-1111-1111-1111-111111111111'], {
+      pool: db.pool,
+      processors: new Map(),
+      out: out.write,
+      err: err.write,
+    })
+
+    expect(code).toBe(1)
+    expect(out.lines).toEqual([])
+    expect(err.lines.join('\n')).toContain('no provider_identities row')
+
+    const { rows } = await db.pool.query<{ id: string; external_id: string }>(
+      'select id, external_id from provider_identities',
+    )
+    expect(rows).toEqual([{ id: identityId, external_id: 'ext-keep' }])
+    const { rows: earns } = await db.pool.query<{ n: number }>(
+      'select count(*)::int as n from xp_entries where forfeited_at is null',
+    )
+    expect(first(earns).n).toBe(1)
+  })
+
+  it('refuses "erase-identity-id" without ERASURE_PEPPER and never reaches the pool', async () => {
+    const connect = vi.fn()
+    const query = vi.fn()
+    const err = capture()
+
+    const code = await runCli(['erase-identity-id', '11111111-1111-1111-1111-111111111111'], {
+      pool: { connect, query } as unknown as Pool,
+      processors: new Map(),
+      out: capture().write,
+      err: err.write,
+    })
+
+    expect(code).toBe(1)
+    expect(connect).not.toHaveBeenCalled()
+    expect(query).not.toHaveBeenCalled()
+    expect(err.lines.join('\n')).toContain(ERASURE_PEPPER_ENV)
   })
 
   it('refuses "erase-identity-id" on an attached identity and changes nothing', async () => {

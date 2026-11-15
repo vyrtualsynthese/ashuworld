@@ -280,9 +280,9 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
       const fanId = await withTransaction(deps.pool, (tx) => findActiveFanId(tx, handle))
       if (fanId === null) {
         err(
-          `[worker] no active account has that handle: ${handle}; an erased account no longer ` +
-            'answers to its old handle, so a re-run of an erasure ends here rather than in a ' +
-            'typo',
+          `[worker] no active account has that handle: ${handle}; a re-run of an erasure ends ` +
+            'here, and a handle that never existed looks the same, so check the spelling ' +
+            'before assuming the account is gone',
         )
         return 1
       }
@@ -387,12 +387,17 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
       const result = await withTransaction(deps.pool, (tx) =>
         eraseIdentity(tx, { identityId, pepper }),
       )
+      // Three outcomes, not two. `erased` false with a forfeit is a retry that met an earn
+      // recorded after the first erasure: the row was already anonymised, but that earn is
+      // gone now, so "nothing changed" would be a lie.
+      const outcome = result.erased
+        ? 'the identity is erased'
+        : result.forfeitedEntries > 0
+          ? 'the row was already anonymised, and its live earns were forfeited this time'
+          : 'it was already erased, so nothing changed'
       out(
         `[worker] identity erasure complete: erased ${result.erased}, ` +
-          `forfeitedEntries ${result.forfeitedEntries}; ` +
-          (result.erased
-            ? 'the identity is erased'
-            : 'it was already erased, so nothing changed'),
+          `forfeitedEntries ${result.forfeitedEntries}; ${outcome}`,
       )
       return 0
     } catch (error) {
