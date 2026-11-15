@@ -4,7 +4,7 @@ Ce fichier relie chaque obligation à l'endroit du dépôt ou du site qui la rem
 point de départ à une revue, pas de preuve à lui seul : chaque ligne se vérifie en ouvrant le
 fichier ou la route nommée.
 
-Dernière revue : 15 novembre 2026. Revue suivante : 15 novembre 2027.
+Dernière revue (création du document) : 15 novembre 2026. Revue suivante : 15 novembre 2027.
 
 ## Tableau de correspondance
 
@@ -17,7 +17,7 @@ Dernière revue : 15 novembre 2026. Revue suivante : 15 novembre 2027.
 | Droit d'accès | `export-fan <handle>` dans `apps/worker/src/cli.ts`, `exportFan` dans `packages/ledger/src/privacy.ts` | Exécuter `export-fan` sur un compte de test : le JSON contient le compte, ses identités et toutes ses entrées. |
 | Droit à l'effacement | `erase-fan`, `erase-identity`, `erase-identity-id` dans `apps/worker/src/cli.ts`, `eraseFan` et `eraseIdentity` dans `packages/ledger/src/privacy.ts` | Exécuter `erase-fan` sur un compte de test : profil 404, entrées abandonnées, identités pseudonymisées. |
 | Droit de rectification | Rafraîchissement du handle d'identité par `refreshIdentityHandle` dans `packages/ledger/src/identity.ts`, appelé à chaque connexion depuis `apps/api/src/routes/auth.ts` | Renommer un compte de plateforme puis se reconnecter : le handle affiché suit. Le handle Dachi reste figé (voir le runbook). |
-| Durées de conservation | Constantes de `packages/ledger/src/privacy.ts` (`INACTIVE_FAN_RETENTION_DAYS`, `NEVER_LINKED_IDENTITY_RETENTION_DAYS`, `PROCESSED_EVENT_RETENTION_DAYS`, `AUDIT_RETENTION_DAYS`) et `purgeBatch` ; exécution par le CronJob `deploy/helm/ashuworld/templates/purge-cronjob.yaml` | Lire les quatre constantes (1 095, 1 095, 30, 1 095) et vérifier que le CronJob appelle `purge` avec `PURGE_CONFIRM`. |
+| Durées de conservation | Constantes de `packages/ledger/src/privacy.ts` (`INACTIVE_FAN_RETENTION_DAYS`, `NEVER_LINKED_IDENTITY_RETENTION_DAYS`, `PROCESSED_EVENT_RETENTION_DAYS`, `AUDIT_RETENTION_DAYS`) et `purgeBatch` ; exécution par le CronJob `deploy/helm/ashuworld/templates/purge-cronjob.yaml`, lorsqu'il est activé | Lire les quatre constantes (1 095, 1 095, 30, 1 095) et vérifier que le CronJob, activé par `purge.enabled`, appelle `purge` avec `PURGE_CONFIRM`. |
 | Sécurité des traitements (RGPD, article 32) | `@fastify/helmet` et `@fastify/rate-limit` enregistrés dans `apps/api/src/server.ts` (`apps/api/src/security/headers.ts`, `apps/api/src/security/rateLimit.ts`), en-têtes nginx dans `docker/nginx/security-headers.conf`, `Cache-Control: no-store` pour les réponses sensibles dans `docker/nginx/default.conf.template`, images non-root et lecture seule dans `deploy/helm/ashuworld/templates/purge-cronjob.yaml` et `deploy/helm/ashuworld/templates/worker.yaml` | `curl -I` sur le site : HSTS, CSP, `X-Content-Type-Options`, `Referrer-Policy` présents. Le chart pose `runAsNonRoot`, `readOnlyRootFilesystem` et `drop: ["ALL"]`. |
 | Cookies et traceurs | Section « Cookies et traceurs » de `CONFIDENTIALITE` dans `apps/web/src/legal/content.ts` | Deux cookies strictement nécessaires seulement : `ashuworld_session` (HttpOnly, 30 jours) et `ashu_oauth_state` (10 minutes). Aucun bandeau, aucun traceur. |
 | Registre des traitements (RGPD, article 30) | `docs/legal/registre-des-traitements.md` | Le tableau porte les champs de l'article 30 pour l'unique traitement. |
