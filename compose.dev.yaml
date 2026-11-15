@@ -51,6 +51,9 @@ services:
     command: ["pnpm", "exec", "tsx", "watch", "--inspect=0.0.0.0:9229", "apps/api/src/index.ts"]
     environment:
       DATABASE_URL: postgres://ashu:ashu@db:5432/ashu
+      # Development only: the pepper that makes an erased account unlinkable. A real
+      # deployment reads it from a Secret; this value must never be one.
+      ERASURE_PEPPER: dev-pepper-not-a-secret
       PUBLIC_BASE_URL: http://localhost:5173
       SESSION_COOKIE_NAME: ashuworld_session
       COOKIE_SECURE: "false"
@@ -92,6 +95,9 @@ services:
     command: ["pnpm", "exec", "tsx", "watch", "--inspect=0.0.0.0:9230", "apps/worker/src/index.ts"]
     environment:
       DATABASE_URL: postgres://ashu:ashu@db:5432/ashu
+      # Same development-only pepper as the api, so the worker's erase commands key the
+      # values the api reads back. Never a deployment value.
+      ERASURE_PEPPER: dev-pepper-not-a-secret
       CHOKIDAR_USEPOLLING: "1"
     env_file:
       - path: .env

@@ -93,9 +93,23 @@ postgres:
   # The key in that Secret whose value is the full `postgres://user:pass@host/db` URL.
   urlKey: url
 
+erasure:
+  # The Secret holding the erasure pepper: the server-side key that turns a provider id into
+  # the one-way value stored in the database. The chart never renders this Secret and has no
+  # value for it; the operator creates it, because losing it is unrecoverable for every row
+  # already erased and leaking it would re-link those rows to real accounts:
+  #
+  #   kubectl create secret generic ashuworld-erasure \
+  #     --from-literal=pepper="$(openssl rand -base64 48)"
+  pepperSecretName: ashuworld-erasure
+  # The key in that Secret whose value is the pepper itself.
+  pepperKey: pepper
+
 game:
   # Must match "version" in packages/gameconfig/config/game.json. The api and worker receive
   # it as GAME_CONFIG_VERSION, and the alpha reset Job logs it with the counts it deleted.
+  # The purge CronJob receives it too, so a retention window chosen from a game version
+  # change is visible in the run's environment.
   configVersion: "2026-11-14.2"
 
 ingress:
@@ -145,6 +159,30 @@ levelRecompute:
   # current table and raises the levels that now qualify, never lowering one. Like the
   # alpha reset, it is a plain Job an operator turns on, runs, and deletes.
   enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+purge:
+  # The daily retention pass: a CronJob running `node dist/worker.js purge`, which deletes the
+  # rows older than the documented retention windows. Off by default, because it deletes data
+  # and turning it on is an operator decision, not something an upgrade should make.
+  enabled: false
+  # Daily, at 03:17 rather than on the hour: the pass competes with nothing else at that
+  # minute, and a fixed offset makes the run easy to find in the pod history.
+  schedule: "17 3 * * *"
+  # Arms the pass. The code compares this exact string and refuses anything else, so a typo
+  # in a values file cannot run a deletion.
+  confirm: purge-ashuworld
+  # Create the confirm Secret from the value above. Set to false and fill secretName to use
+  # one the operator created instead.
+  createSecret: true
+  secretName: ""
+  # The key that holds the confirm value in the Secret.
+  secretKey: confirm
   resources:
     requests:
       cpu: 50m

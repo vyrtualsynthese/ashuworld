@@ -48,6 +48,10 @@ services:
       dockerfile: docker/api.Dockerfile
     environment:
       DATABASE_URL: postgres://ashu:ashu@db:5432/ashu
+      # Development only, and it must stay that way: this is the key that makes an erased
+      # account unlinkable, so a real deployment reads it from a Secret and never from a
+      # file in the repository. Every stack started from this file shares this value.
+      ERASURE_PEPPER: dev-pepper-not-a-secret
       PUBLIC_BASE_URL: http://localhost:8080
       SESSION_COOKIE_NAME: ashuworld_session
       COOKIE_SECURE: "false"
@@ -75,6 +79,9 @@ services:
       dockerfile: docker/worker.Dockerfile
     environment:
       DATABASE_URL: postgres://ashu:ashu@db:5432/ashu
+      # The same development-only pepper as the api, because the worker's erase commands
+      # key the values the api reads back. Never a deployment value.
+      ERASURE_PEPPER: dev-pepper-not-a-secret
     depends_on:
       migrate:
         condition: service_completed_successfully
