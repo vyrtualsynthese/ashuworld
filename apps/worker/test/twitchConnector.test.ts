@@ -74,6 +74,22 @@ function tokenDeps(fetchImpl: typeof fetch, overrides: Partial<TwitchTokenDeps> 
   }
 }
 
+/**
+ * A sleep that records instead of waiting, so a test asserts the delay it was asked for.
+ *
+ * The connector is told to use this wherever it would really pause, which keeps a test of a
+ * two-second rate-limit wait instant.
+ */
+function recordingSleep(): { sleep: (ms: number) => Promise<void>; delays: number[] } {
+  const delays: number[] = []
+  return {
+    delays,
+    sleep: async (ms) => {
+      delays.push(ms)
+    },
+  }
+}
+
 /** A complete Twitch configuration, as `loadWorkerEnv` would produce it for the connector. */
 function twitchEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
   return {
@@ -203,6 +219,43 @@ describe('getTwitchAccessToken', () => {
       getTwitchAccessToken(tokenDeps(fetchImpl, { clientId: 'refresh-fail-client' })),
     ).rejects.toThrow(/400/)
   })
+
+  it('waits out a rate-limited refresh through the same helper as the pages', async () => {
+    let refreshes = 0
+    const { fetchImpl, calls } = recordingFetch(() => {
+      refreshes += 1
+      if (refreshes === 1) {
+        return new Response('{"message":"too many requests"}', {
+          status: 429,
+          headers: { 'retry-after': '1' },
+        })
+      }
+      return json({ access_token: 'at', expires_in: 3600 })
+    })
+    const { sleep, delays } = recordingSleep()
+
+    const token = await getTwitchAccessToken(
+      tokenDeps(fetchImpl, { clientId: 'rate-limited-refresh-client', sleep }),
+    )
+
+    expect(token).toBe('at')
+    // One second, as the header said, then the same refresh sent again with the same grant.
+    expect(delays).toEqual([1000])
+    expect(calls.map((call) => call.body.get('refresh_token'))).toEqual(['rt-env', 'rt-env'])
+  })
+
+  it('gives up on a refresh that keeps being rate limited', async () => {
+    const { fetchImpl, calls } = recordingFetch(() => new Response('slow down', { status: 429 }))
+    const { sleep, delays } = recordingSleep()
+
+    await expect(
+      getTwitchAccessToken(tokenDeps(fetchImpl, { clientId: 'always-limited-client', sleep })),
+    ).rejects.toThrow(/429/)
+
+    // Four attempts and three waits: one more of either is a refresh loop, not a retry.
+    expect(calls).toHaveLength(4)
+    expect(delays).toEqual([1000, 1000, 1000])
+  })
 })
 
 describe('createTwitchConnector', () => {
@@ -295,12 +348,73 @@ describe('createTwitchConnector', () => {
     expect(refreshes).toHaveLength(1)
   })
 
+  /** A Twitch that answers the first follower page with `first`, then serves `then`. */
+  function limitedFollowerFetch(first: Response, then: () => Response) {
+    let pages = 0
+    return recordingFetch((url) => {
+      if (url.pathname === '/oauth2/token') return json({ access_token: 'at', expires_in: 3600 })
+      if (url.pathname === '/helix/users') return json({ data: [{ id: '42', login: 'channel-login' }] })
+      pages += 1
+      return pages === 1 ? first : then()
+    })
+  }
+
+  it('waits what Retry-After asks and asks for the same page again', async () => {
+    const { fetchImpl, calls } = limitedFollowerFetch(
+      new Response('rate limited', { status: 429, headers: { 'retry-after': '2' } }),
+      () => json({ data: [follower('1')], pagination: {} }),
+    )
+    const { sleep, delays } = recordingSleep()
+    const connector = createTwitchConnector({ pool, env: twitchEnv(), fetchImpl, sleep })
+
+    const people = await collect(connector)
+
+    // The page arrives, and the two seconds the header asked for is what was waited.
+    expect(people.map((person) => person.externalId)).toEqual(['1'])
+    expect(delays).toEqual([2000])
+
+    // The retry is the same request, not a re-planned one: same query string, same headers.
+    const pages = calls.filter((call) => call.url.pathname === '/helix/channels/followers')
+    expect(pages).toHaveLength(2)
+    expect(pages[1]?.url.href).toBe(pages[0]?.url.href)
+  })
+
+  it('waits the default when the rate limit names no delay', async () => {
+    const { fetchImpl } = limitedFollowerFetch(new Response('rate limited', { status: 429 }), () =>
+      json({ data: [], pagination: {} }),
+    )
+    const { sleep, delays } = recordingSleep()
+    const connector = createTwitchConnector({ pool, env: twitchEnv(), fetchImpl, sleep })
+
+    await collect(connector)
+
+    expect(delays).toEqual([1000])
+  })
+
+  it('gives up on a page that keeps being rate limited', async () => {
+    const { fetchImpl, calls } = limitedFollowerFetch(new Response('rate limited', { status: 429 }), () =>
+      new Response('rate limited', { status: 429 }),
+    )
+    const { sleep, delays } = recordingSleep()
+    const connector = createTwitchConnector({ pool, env: twitchEnv(), fetchImpl, sleep })
+
+    const { error } = await failureOf(connector)
+
+    // Four attempts and three waits, then the ordinary refusal naming the status: waiting
+    // longer would hold the round open instead of letting the next tick try again.
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain('429')
+    expect(delays).toEqual([1000, 1000, 1000])
+    expect(calls.filter((call) => call.url.pathname === '/helix/channels/followers')).toHaveLength(4)
+  })
+
   it('reports a failed follower page without yielding partial garbage', async () => {
     const { fetchImpl } = helixFetch({
       first: json({ data: [follower('1'), follower('2')], pagination: { cursor: 'page-2' } }),
       'page-2': new Response('upstream is down', { status: 500 }),
     })
-    const connector = createTwitchConnector({ pool, env: twitchEnv(), fetchImpl })
+    const { sleep, delays } = recordingSleep()
+    const connector = createTwitchConnector({ pool, env: twitchEnv(), fetchImpl, sleep })
 
     const { error, people } = await failureOf(connector)
 
@@ -310,6 +424,8 @@ describe('createTwitchConnector', () => {
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toContain('500')
     expect(people.map((person) => person.externalId)).toEqual(['1', '2'])
+    // A 500 is an outage, not a rate limit: no wait, no second request for that page.
+    expect(delays).toEqual([])
   })
 
   it('throws when a follower row has no usable identity', async () => {
