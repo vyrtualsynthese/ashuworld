@@ -11,9 +11,31 @@ the data is expected to be wiped before launch.
 
 ### Added
 
-- Platform adapters: Twitch EventSub follow events with signature verification, Discord
-  membership, YouTube subscription through each fan's own Google grant.
-- Operator tools: the punishment view, the audit read view, and the audited identity repair.
+- Security headers on the API and the web app, rate limits on sign-in, on destructive writes and
+  on public reads, and `no-store` on every response that carries personal data.
+- The three legal pages at `/mentions-legales`, `/confidentialite` and `/cgu`, linked from every
+  page.
+- A consent gate: the 15-year declaration and the CGU acceptance, recorded once and never
+  overwritten.
+- Data-rights commands `export-fan`, `erase-fan`, `erase-identity`, `erase-identity-id` and
+  `purge`, the gated daily purge CronJob and the `ERASURE_PEPPER` Secret. Erasure anonymises the
+  rows and keeps the one-time keys spent, so an erased account cannot be re-linked.
+- `docs/legal/`: the processing register, the rights runbook and the compliance map.
+- CI pinning of every action and image, the Helm checksum check, the digest-pinned chart-check
+  image, and `pnpm audit --prod`.
+
+### Changed
+
+- The public profile and the ladder no longer publish the account's database id.
+- The auth rate limit applies per route instead of over one shared counter.
+- The docs record the two database ports: `5432` is the local Compose stack and `55432` is the
+  dedicated test database.
+
+### Planned
+
+- Platform adapters (Twitch EventSub follow events, Discord membership, YouTube subscription) and
+  the operator tools (punishment view, audit read view, audited identity repair) are not built
+  yet.
 
 ## [0.1.0] - 2026-11-14
 

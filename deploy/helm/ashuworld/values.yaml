@@ -22,7 +22,7 @@ imagePullSecrets: []
 api:
   image:
     # Replace with the repository CI publishes to, e.g. ghcr.io/<owner>/<repo>/api.
-    repository: ghcr.io/your-org/ashuworld/api
+    repository: ghcr.io/vyrtualsynthese/ashuworld/api
     # Empty means "the shared image.tag", and then the chart's appVersion.
     tag: ""
   replicaCount: 1
@@ -45,7 +45,7 @@ api:
 
 web:
   image:
-    repository: ghcr.io/your-org/ashuworld/web
+    repository: ghcr.io/vyrtualsynthese/ashuworld/web
     tag: ""
   replicaCount: 1
   # nginx listens on an unprivileged port, so the image runs as uid 101 with no capabilities.
@@ -59,7 +59,7 @@ web:
 
 worker:
   image:
-    repository: ghcr.io/your-org/ashuworld/worker
+    repository: ghcr.io/vyrtualsynthese/ashuworld/worker
     tag: ""
   replicaCount: 1
   # The port a provider adapter will bind. It is only declared, and the worker's Service is
@@ -100,7 +100,7 @@ erasure:
   # already erased and leaking it would re-link those rows to real accounts:
   #
   #   kubectl create secret generic ashuworld-erasure \
-  #     --from-literal=pepper="$(openssl rand -base64 48)"
+  #     --from-literal=pepper="$(openssl rand -hex 32)"
   pepperSecretName: ashuworld-erasure
   # The key in that Secret whose value is the pepper itself.
   pepperKey: pepper

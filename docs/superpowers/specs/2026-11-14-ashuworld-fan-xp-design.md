@@ -1,6 +1,9 @@
 # AshuWorld — Dachi XP and levels
 
-Status: draft for approval. Alpha; everything is expected to be wiped before launch.
+> Status: approved. The access, legal and documentation decisions live in
+> 2026-11-14-hardening-and-compliance-design.md.
+
+Alpha; everything is expected to be wiped before launch.
 
 ## Intent
 
@@ -281,10 +284,11 @@ credited is not credited twice.
 
 ### Who is an admin
 
-No roles table at alpha. An allowlist of provider identities in the chart's values
-(`admin_identities`) is checked after login; the allowlist is the operator and any mod
-they add. Consequences: no bootstrap problem, no admin UI to build, and the audit trail
-records the acting Dachi. Moving to a role column later is a migration, not a redesign.
+Not implemented in this milestone. No values file ever carried the admin allowlist this document
+once promised, and no route reads one. Admin tooling is a later milestone: the punishment view,
+the audit read view and the audited identity repair all wait for it. Adding it is a migration, not
+a redesign — a roles column on the account table or an allowlist checked after login both fit the
+schema as it stands, and the audit trail still records the acting Dachi.
 
 ### Kubernetes, images and CI
 
