@@ -16,6 +16,15 @@ export type ProcessOutcome = 'processed' | 'duplicate' | 'empty'
 /** The pause between polls whenever there was nothing to claim. */
 export const DEFAULT_INTERVAL_MS = 1000
 
+/**
+ * The number of failed attempts after which a poison event drops out of the claim and
+ * stays in the table for the operator.
+ *
+ * It is the upper bound in the claim SQL, so raising it delays the point where a bad
+ * event stops blocking its provider's queue, and lowering it parks a flaky event sooner.
+ */
+export const MAX_EVENT_ATTEMPTS = 5
+
 interface ClaimedEvent {
   id: string
   provider: string
@@ -53,12 +62,13 @@ async function recordFailedAttempt(pool: Pool, id: string): Promise<number | und
  *
  * The claim is the concurrency control: `for update skip locked` takes the row lock and
  * makes a second worker skip the row instead of waiting for it, and the
- * `processed_at is null` filter is what makes a claim mean "not yet paid". `attempts < 5`
- * is the retry bound: a poison event that fails five times drops out of the claim instead
- * of staying the oldest row forever, so the rest of its provider's queue drains. It stays
- * in the table with `attempts = 5` for the operator to find. The processor runs inside the
- * same transaction, so its awards and the processed mark commit together: a crash between
- * them cannot pay the event twice, and a throw cannot leave half the work behind.
+ * `processed_at is null` filter is what makes a claim mean "not yet paid". `attempts <
+ * MAX_EVENT_ATTEMPTS` is the retry bound: a poison event that fails that many times drops
+ * out of the claim instead of staying the oldest row forever, so the rest of its provider's
+ * queue drains. It stays in the table at the bound, for the operator to find. The processor
+ * runs inside the same transaction, so its awards and the processed mark commit together:
+ * a crash between them cannot pay the event twice, and a throw cannot leave half the work
+ * behind.
  *
  * This deliberately does not call `ingestEvent`. That function exists for first arrival;
  * it treats an existing `(provider, event_id)` as a duplicate and skips the handler,
@@ -67,8 +77,8 @@ async function recordFailedAttempt(pool: Pool, id: string): Promise<number | und
  * On a throw the transaction rolls back, a second small transaction increments `attempts`,
  * the failure is logged with the event id and the attempt number, and the poll reports
  * `'empty'` so the loop waits and then takes the next row. There is no dead-letter table
- * at alpha: a row that reaches five attempts stays unprocessed, is no longer claimed, and
- * the operator finds it by its `attempts` count.
+ * at alpha: a row that reaches `MAX_EVENT_ATTEMPTS` stays unprocessed, is no longer
+ * claimed, and the operator finds it by its `attempts` count.
  *
  * Only providers with a registered processor are claimed. An event from any other provider
  * stays in the table untouched — it is not marked processed, so it is not lost, and its
@@ -84,7 +94,7 @@ export async function processOne(pool: Pool, processors: ProcessorMap): Promise<
         `select id, provider, event_id, payload
            from inbound_events
           where processed_at is null
-            and attempts < 5
+            and attempts < ${MAX_EVENT_ATTEMPTS}
             and provider = any($1::text[])
           order by id
           for update skip locked
@@ -120,7 +130,8 @@ export async function processOne(pool: Pool, processors: ProcessorMap): Promise<
     }
     console.error(
       `[worker] inbound event #${claimed.id} (${claimed.provider} "${claimed.event_id}") failed on ` +
-        `attempt ${attempt}; it stays unprocessed and the claim retries it while attempts < 5`,
+        `attempt ${attempt}; it stays unprocessed and the claim retries it while ` +
+        `attempts < ${MAX_EVENT_ATTEMPTS}`,
       error,
     )
     return 'empty'
