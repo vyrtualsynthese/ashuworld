@@ -64,7 +64,7 @@ component, then the shared image.tag, then the chart's appVersion.
 {{- end -}}
 
 {{/*
-DATABASE_URL, read from the operator's Secret. It is defined once because four workloads
+DATABASE_URL, read from the operator's Secret. It is defined once because five workloads
 need it and a literal URL in any one of them would be the mistake this chart exists to
 prevent.
 */}}
@@ -74,6 +74,19 @@ prevent.
     secretKeyRef:
       name: {{ required "postgres.secretName is required" .Values.postgres.secretName }}
       key: {{ required "postgres.urlKey is required" .Values.postgres.urlKey }}
+{{- end -}}
+
+{{/*
+The erasure pepper, read from the operator's Secret. Defined once because the api, the worker
+and the purge CronJob all erase or read erased rows, and a literal value in any one of them
+would put the pepper into `helm get manifest` and the release's stored values.
+*/}}
+{{- define "ashuworld.erasurePepperEnv" -}}
+- name: ERASURE_PEPPER
+  valueFrom:
+    secretKeyRef:
+      name: {{ required "erasure.pepperSecretName is required" .Values.erasure.pepperSecretName }}
+      key: {{ required "erasure.pepperKey is required" .Values.erasure.pepperKey }}
 {{- end -}}
 
 {{/*
@@ -88,4 +101,9 @@ Secure flag on the session cookie.
 {{/* The Secret name holding the alpha reset confirm value. */}}
 {{- define "ashuworld.resetSecretName" -}}
 {{- .Values.alphaReset.secretName | default (printf "%s-reset" (include "ashuworld.fullname" .)) -}}
+{{- end -}}
+
+{{/* The Secret name holding the purge confirm value: the operator's, or the chart's. */}}
+{{- define "ashuworld.purgeSecretName" -}}
+{{- .Values.purge.secretName | default (printf "%s-purge" (include "ashuworld.fullname" .)) -}}
 {{- end -}}

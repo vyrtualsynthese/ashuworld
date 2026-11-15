@@ -38,6 +38,9 @@ spec:
               protocol: TCP
           env:
             {{- include "ashuworld.databaseUrlEnv" . | nindent 12 }}
+            # The pepper that makes an erased account unlinkable. Required: the api refuses
+            # to start without it rather than writing an unkeyed value.
+            {{- include "ashuworld.erasurePepperEnv" . | nindent 12 }}
             - name: PORT
               value: {{ .Values.api.port | quote }}
             # Derived from the ingress host: the cookie's Secure flag and every absolute

@@ -1,0 +1,82 @@
+{{/*
+The daily retention pass. Off by default: it deletes rows past their retention window, so an
+upgrade must never start it. `purge.enabled=true` is the operator's decision, and the value
+stays on across releases until it is turned off again.
+*/}}
+{{- if .Values.purge.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "ashuworld.fullname" . }}-purge
+  labels:
+    {{- include "ashuworld.labels" . | nindent 4 }}
+    app.kubernetes.io/component: purge
+spec:
+  schedule: {{ required "purge.schedule is required when purge.enabled is true" .Values.purge.schedule | quote }}
+  # Two passes at once would claim the same batch and race on the same rows. A run that is
+  # still going when the next one is due simply keeps the schedule occupied; the following
+  # day picks up what is left, so skipping a run costs nothing.
+  concurrencyPolicy: Forbid
+  # A run missed because the controller was down is started if it is less than five minutes
+  # late, and skipped after that: a deletion one day late is not worth an immediate retry at
+  # an unpredictable hour.
+  startingDeadlineSeconds: 300
+  # Three of each, so the last few nights' counts stay readable in `kubectl get jobs` without
+  # the history growing without bound.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # The pass deletes in bounded batches and commits each one, so a retry resumes from
+      # where it stopped instead of repeating a half-finished step.
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            {{- include "ashuworld.selectorLabels" (dict "root" . "component" "purge") | nindent 12 }}
+        spec:
+          # OnFailure rather than Never: the container is the unit that retries, and it keeps
+          # the pass in the same pod so the logs of every attempt are in one place.
+          restartPolicy: OnFailure
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: purge
+              # The worker image: the retention pass is a subcommand of the worker process,
+              # so it uses the same ledger code and the same pool the loop does.
+              image: {{ include "ashuworld.image" (dict "root" . "component" "worker") }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["node", "dist/worker.js", "purge"]
+              env:
+                {{- include "ashuworld.databaseUrlEnv" . | nindent 16 }}
+                # The pepper is not used to delete, but the pass reads identities the erasure
+                # wrote: without it a run could not tell a keyed value from a corrupt one, so
+                # the same Secret the api and worker read is mounted here.
+                {{- include "ashuworld.erasurePepperEnv" . | nindent 16 }}
+                # The confirm token comes from a Secret, never from an inline value: a typo in
+                # the chart cannot arm a deletion, and `helm get manifest` does not show it.
+                - name: PURGE_CONFIRM
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "ashuworld.purgeSecretName" . }}
+                      key: {{ required "purge.secretKey is required" .Values.purge.secretKey }}
+                - name: GAME_CONFIG_VERSION
+                  value: {{ required "game.configVersion is required" .Values.game.configVersion | quote }}
+              resources:
+                {{- toYaml .Values.purge.resources | nindent 16 }}
+              securityContext:
+                runAsNonRoot: true
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+{{- end }}

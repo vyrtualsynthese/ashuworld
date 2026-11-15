@@ -3,9 +3,10 @@
 # Renders the chart and asserts the promises the deployment makes.
 #
 # Every check here failed at least once during the chart's first draft, or is a rule the
-# brief calls out by name. The script renders the chart four times: the default values,
-# with the hook receiver turned on, with the alpha reset turned on, and with the level
-# recompute turned on, because the gated resources must stay out of a default install.
+# brief calls out by name. The script renders the chart five times: the default values,
+# with the hook receiver turned on, with the alpha reset turned on, with the level
+# recompute turned on, and with the purge CronJob turned on, because the gated resources
+# must stay out of a default install.
 #
 # Run from anywhere: the chart directory is resolved from this file's own path.
 set -euo pipefail
@@ -27,6 +28,7 @@ default_out="$(render)"
 hooks_out="$(render --set hooks.enabled=true)"
 reset_out="$(render --set alphaReset.enabled=true)"
 level_out="$(render --set levelRecompute.enabled=true)"
+purge_out="$(render --set purge.enabled=true)"
 
 # --- shape ---------------------------------------------------------------------------
 
@@ -68,6 +70,25 @@ grep -q 'level-recompute' <<<"$default_out" &&
   fail "level recompute job rendered without levelRecompute.enabled"
 grep -q 'level-recompute' <<<"$level_out" ||
   fail "level recompute job missing when levelRecompute.enabled=true"
+
+# --- the purge CronJob is gated and armed --------------------------------------------
+
+test "$(grep -c 'kind: CronJob' <<<"$default_out")" -eq 0 ||
+  fail "purge CronJob rendered without purge.enabled"
+test "$(grep -c 'kind: CronJob' <<<"$purge_out")" -eq 1 ||
+  fail "expected exactly one CronJob when purge.enabled=true"
+grep -q 'command: \["node", "dist/worker.js", "purge"\]' <<<"$purge_out" ||
+  fail "the CronJob does not run the purge subcommand"
+grep -q 'concurrencyPolicy: Forbid' <<<"$purge_out" ||
+  fail "two purge passes may run at once, and they would race for the same rows"
+grep -q 'restartPolicy: OnFailure' <<<"$purge_out" ||
+  fail "the purge container has no restart policy"
+grep -q 'PURGE_CONFIRM' <<<"$purge_out" || fail "purge is not armed"
+grep -q 'purge-ashuworld' <<<"$purge_out" || fail "purge confirm Secret has no value"
+# Three erasing workloads: the api, the worker and the pass. A fourth caller of the ledger's
+# erasure with no pepper would write a value nothing can re-derive.
+test "$(grep -c 'ERASURE_PEPPER' <<<"$purge_out")" -ge 3 ||
+  fail "an erasing workload has no pepper (expected api, worker and purge)"
 
 # --- secrets stay in Secrets ---------------------------------------------------------
 

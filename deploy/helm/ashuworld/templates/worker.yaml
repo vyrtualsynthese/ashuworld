@@ -42,6 +42,9 @@ spec:
           {{- end }}
           env:
             {{- include "ashuworld.databaseUrlEnv" . | nindent 12 }}
+            # Same Secret as the api: the worker erases on command, so it must key the same
+            # way the api does or the two would write values neither can re-derive.
+            {{- include "ashuworld.erasurePepperEnv" . | nindent 12 }}
             # The worker does not serve HTTP yet, but any future adapter that logs a client
             # address must find the same trust decision as the api rather than invent one.
             - name: TRUST_PROXY
