@@ -171,8 +171,9 @@ follows `TRUST_PROXY`):
 | detach | 10 / minute | A destructive write a human does once. |
 | `/api/public/*` | 120 / minute | Generous enough for a crowd behind one NAT; still bounds scraping. |
 
-Configured by `RATE_LIMIT_ENABLED` (default true), `RATE_LIMIT_WINDOW_MS` and
-`RATE_LIMIT_MAX`, so a problematic address can be relieved without a rebuild. A refusal
+Configured by `RATE_LIMIT_ENABLED` (default true), `RATE_LIMIT_WINDOW_MS` and the three
+per-scope ceilings `RATE_LIMIT_PUBLIC_MAX`, `RATE_LIMIT_AUTH_MAX` and `RATE_LIMIT_WRITE_MAX`, so
+a problematic address can be relieved without a rebuild. A refusal
 uses the existing error envelope with code `rate_limited` and status 429. The store is
 in-memory: with several replicas each pod has its own counter. That is documented as the
 alpha trade-off; a shared store (Redis) is what a multi-replica deployment would need.
