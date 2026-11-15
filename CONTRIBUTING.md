@@ -20,7 +20,8 @@ Before opening a pull request:
 ```bash
 git fetch origin
 git rebase origin/develop
-TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu pnpm typecheck
+export TEST_DATABASE_URL=postgres://ashu:ashu@localhost:55432/ashu
+pnpm typecheck
 pnpm lint
 pnpm test:coverage
 bash deploy/helm/ashuworld/test/render.sh   # if you touched the chart
