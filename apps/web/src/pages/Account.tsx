@@ -4,17 +4,24 @@ import {
   ApiError,
   detachIdentity,
   fetchMe,
+  fetchProviders,
   signOut,
   type DetachResult,
   type FanIdentity,
   type Me,
+  type Providers,
 } from '../api'
 import { LevelBadge } from '../components/LevelBadge'
 import { devLoginAvailable } from '../devLogin'
 import { formatNumber } from '../format'
 import { TERMS_VERSION } from '../legal/content'
-import { LINKABLE_PROVIDERS, isProviderName, providerLabel } from '../providers'
-import { useResource } from '../useResource'
+import {
+  LINKABLE_PROVIDERS,
+  isProviderName,
+  providerLabel,
+  type ProviderName,
+} from '../providers'
+import { useResource, type Resource } from '../useResource'
 
 /** What the last action said. One notice at a time, cleared when a new action starts. */
 type Notice =
@@ -57,12 +64,71 @@ function forfeitSentence(entries: number): string {
   return `${formatNumber(entries)} entrées d’XP ont été perdues`
 }
 
-function SignInPanel() {
-  const devDoor = devLoginAvailable()
-  // The api refuses a login start that does not name the accepted version, so the tick is
-  // what unlocks the control, not a decoration next to it.
+/**
+ * What the page knows about the sign-in doors: still asking, could not ask, or the list.
+ *
+ * "Could not ask" is its own state, because it is not the same answer as an empty list. An
+ * empty list is the api saying this deployment runs no door; an unreadable one is the page
+ * having no idea, and it may only fall back to what the build says.
+ */
+type Doors =
+  | { state: 'loading' }
+  | { state: 'unavailable' }
+  | { state: 'ready'; providers: readonly ProviderName[] }
+
+/**
+ * Reads the capability answer, keeping only the names this build can render.
+ *
+ * A name that arrived in the JSON but is not one of the four the app knows gets dropped
+ * rather than drawn: it would have no label, and its button is not a promise this page can
+ * keep. An answer that is not a list at all — an older api, a proxy with a different
+ * opinion — is treated as no answer.
+ */
+function doorList(resource: Resource<Providers>): Doors {
+  if (resource.state === 'loading') return { state: 'loading' }
+  if (resource.state === 'error') return { state: 'unavailable' }
+  const names: unknown = resource.data.providers
+  if (!Array.isArray(names)) return { state: 'unavailable' }
+  return {
+    state: 'ready',
+    providers: names.filter(
+      (name): name is ProviderName => typeof name === 'string' && isProviderName(name),
+    ),
+  }
+}
+
+/** What to say about the dev door, which is a test door and not a way in for a Dachi. */
+function devDoorSentence(onlyDoor: boolean): string {
+  if (onlyDoor) {
+    return 'Ce déploiement ne propose que la connexion de développement. Elle te connecte à un compte de test nommé et ne prouve rien : elle n’est pas destinée aux vrais Dachis.'
+  }
+  return 'Ce déploiement propose aussi un compte de test nommé. Il ne prouve rien : il n’est pas destiné aux vrais Dachis.'
+}
+
+/**
+ * The way in, one button per door this deployment actually opens.
+ *
+ * The list comes from the api rather than from this bundle, because the api is what decides
+ * whether a door exists: a button offered for a door that is off lands the visitor on
+ * `unknown_provider`, which is a worse answer than the sentence that says sign-in is not
+ * switched on. When the answer cannot be read, only the build's dev flag is left, and that
+ * is a flag, not a guess about a provider.
+ */
+function SignInPanel({ doors }: { doors: Doors }) {
+  const real = doors.state === 'ready' ? doors.providers.filter((name) => name !== 'dev') : []
+  // The api's answer wins whenever there is one: a dev build must not add a button the
+  // server would refuse, and a listed `dev` must be offered even where the flag is silent.
+  const devDoor =
+    doors.state === 'ready'
+      ? doors.providers.includes('dev')
+      : doors.state === 'unavailable' && devLoginAvailable()
+  // The sentence follows the buttons, not the raw answer: if nothing was drawn there must be
+  // a reason on screen, and silence is never that reason. While the answer is in flight
+  // there is nothing to report yet.
+  // The api refuses a login start that does not name the accepted version, so the tick
+  // unlocks every login control, real provider or dev.
   const [accepted, setAccepted] = useState(false)
-  const devText = 'Se connecter avec le compte de développement'
+  const noDoor = doors.state !== 'loading' && real.length === 0 && !devDoor
 
   return (
     <section className="panel" aria-labelledby="sign-in-heading">
@@ -71,35 +137,56 @@ function SignInPanel() {
         Ton XP, ton niveau et les comptes rattachés vivent au même endroit. Connecte-toi
         avec une plateforme que tu utilises déjà et cette page les affichera.
       </p>
-      {devDoor ? (
+      {(real.length > 0 || devDoor) && (
+        <p>
+          <label>
+            <input
+              type="checkbox"
+              checked={accepted}
+              onChange={(event) => setAccepted(event.target.checked)}
+            />{' '}
+            J’ai 15 ans ou plus et j’accepte les <Link to="/cgu">CGU</Link> et la{' '}
+            <Link to="/confidentialite">politique de confidentialité</Link>
+          </label>
+        </p>
+      )}
+      {real.length > 0 && (
+        <ul className="attach-list">
+          {real.map((provider) => (
+            <li key={provider}>
+              {/* A full navigation: the handshake is served by the api. */}
+              {accepted ? (
+                <a className="button" href={signInHref(provider, 'login', TERMS_VERSION)}>
+                  Se connecter avec {providerLabel(provider)}
+                </a>
+              ) : (
+                <button type="button" className="button" disabled>
+                  Se connecter avec {providerLabel(provider)}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {devDoor && (
         <>
-          <p className="muted">
-            Ce déploiement ne propose que la connexion de développement. Elle te connecte à
-            un compte de test nommé et ne prouve rien : elle n’est pas destinée aux vrais
-            Dachis.
-          </p>
-          <p>
-            <label>
-              <input
-                type="checkbox"
-                checked={accepted}
-                onChange={(event) => setAccepted(event.target.checked)}
-              />{' '}
-              J’ai 15 ans ou plus et j’accepte les <Link to="/cgu">CGU</Link> et la{' '}
-              <Link to="/confidentialite">politique de confidentialité</Link>
-            </label>
-          </p>
+          <p className="muted">{devDoorSentence(real.length === 0)}</p>
           {accepted ? (
             <a className="button" href={signInHref('dev', 'login', TERMS_VERSION)}>
-              {devText}
+              {real.length === 0
+                ? 'Se connecter avec le compte de développement'
+                : 'Se connecter avec le compte de test dev'}
             </a>
           ) : (
             <button type="button" className="button" disabled>
-              {devText}
+              {real.length === 0
+                ? 'Se connecter avec le compte de développement'
+                : 'Se connecter avec le compte de test dev'}
             </button>
           )}
         </>
-      ) : (
+      )}
+      {noDoor && (
         <p className="muted">
           La connexion n’est pas activée sur ce déploiement. Demande à la personne qui gère
           AshuWorld de configurer une plateforme.
@@ -246,9 +333,20 @@ function DetachConfirm({ identity, busy, onConfirm, onCancel }: DetachConfirmPro
 }
 
 /** The providers this account does not hold yet, offered as a fresh link sign-in. */
-function AttachPanel({ me }: { me: Me }) {
+function AttachPanel({ me, doors }: { me: Me; doors: Doors }) {
   const attached = new Set(me.identities.map((identity) => identity.provider))
-  const available = LINKABLE_PROVIDERS.filter((provider) => !attached.has(provider))
+  // Only a door the api runs can be attached. While the answer is still in flight nothing is
+  // offered: a link drawn before the answer lands would be a guess at the api's state. Once
+  // the answer cannot be read, the whole list comes back: this section already says the api
+  // will refuse a platform that is off, so an extra link costs one refused click, while
+  // hiding one would hide a door that works.
+  const offered =
+    doors.state === 'ready'
+      ? LINKABLE_PROVIDERS.filter((provider) => doors.providers.includes(provider))
+      : doors.state === 'unavailable'
+        ? LINKABLE_PROVIDERS
+        : []
+  const available = offered.filter((provider) => !attached.has(provider))
 
   return (
     <section aria-labelledby="attach-heading">
@@ -258,7 +356,13 @@ function AttachPanel({ me }: { me: Me }) {
         prouver que le compte est le tien. Si une plateforme n’est pas activée sur ce
         déploiement, la connexion le dira.
       </p>
-      {available.length === 0 ? (
+      {doors.state === 'loading' ? (
+        <p className="muted">Vérification des plateformes…</p>
+      ) : offered.length === 0 ? (
+        <p className="muted">
+          Aucune plateforme ne peut être rattachée sur ce déploiement pour l’instant.
+        </p>
+      ) : available.length === 0 ? (
         <p className="muted">
           Toutes les plateformes connues d’AshuWorld sont déjà rattachées.
         </p>
@@ -296,6 +400,10 @@ export function Account() {
   const reattach = requested !== null && isProviderName(requested) ? requested : null
 
   const { resource, reload } = useResource(fetchMe, [])
+  // One capability read for the whole page: the signed-out panel draws its buttons from it
+  // and the signed-in one filters the platforms it may attach.
+  const providers = useResource(fetchProviders, [])
+  const doors = doorList(providers.resource)
   const [detaching, setDetaching] = useState<FanIdentity | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -355,7 +463,7 @@ export function Account() {
         (resource.error instanceof ApiError && resource.error.status === 401 ? (
           <>
             {reattach !== null && <SignedOutDetachedNotice provider={reattach} />}
-            <SignInPanel />
+            <SignInPanel doors={doors} />
           </>
         ) : (
           <>
@@ -441,7 +549,7 @@ export function Account() {
             )}
           </section>
 
-          <AttachPanel me={resource.data} />
+          <AttachPanel me={resource.data} doors={doors} />
         </>
       )}
     </main>

@@ -227,6 +227,22 @@ export function fetchPublicGame(): Promise<PublicGame> {
   return getJson<PublicGame>('/api/public/game')
 }
 
+/**
+ * What `GET /api/public/providers` answers: the sign-in doors this deployment opens.
+ *
+ * The names are the same ones `/auth/:provider/start` resolves against, so a listed name is
+ * a door that will open. Names arrive as plain strings because the list is the api's to
+ * grow: the page filters them through its own guard instead of trusting the type.
+ */
+export interface Providers {
+  providers: string[]
+}
+
+/** The sign-in doors this deployment opens, in the order the page draws them. */
+export function fetchProviders(): Promise<Providers> {
+  return getJson<Providers>('/api/public/providers')
+}
+
 /** The signed-in fan, or a 401 `ApiError` when there is none. */
 export function fetchMe(): Promise<Me> {
   return getJson<Me>('/api/me')

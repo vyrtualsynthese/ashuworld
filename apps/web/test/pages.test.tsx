@@ -21,6 +21,38 @@ import {
 
 const IDENTITY_ID = ME.identities[0]!.id
 
+/**
+ * The detach requests a test's stub was asked to send.
+ *
+ * The account page reads two routes on load, so a total call count no longer says "nothing
+ * was sent". What it has to say is that no detach went out: that POST is the irreversible
+ * one, and it must not leave before the confirmation is answered.
+ */
+function detachRequests(fetchMock: ReturnType<typeof stubFetch>): unknown[][] {
+  return fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/detach'))
+}
+
+/**
+ * Answers each path of one page by name.
+ *
+ * The account page reads two routes, so a single `stubFetch` handler that ignores the URL
+ * can no longer describe it. A number is the status that route answers with; anything else
+ * is its JSON body.
+ */
+function mockFetch(routes: Record<string, object | number>): ReturnType<typeof stubFetch> {
+  return stubFetch((url) => {
+    const answer = routes[url]
+    if (answer === undefined) return textResponse(`no stub for ${url}`, 404)
+    if (typeof answer === 'number') {
+      return jsonResponse(
+        { error: { code: 'http_error', message: `the server answered ${answer}` } },
+        answer,
+      )
+    }
+    return jsonResponse(answer)
+  })
+}
+
 describe('Ladder', () => {
   it('renders one ranked table, with Dachis and unattached accounts side by side', async () => {
     stubFetch(() => jsonResponse(LADDER))
@@ -388,6 +420,46 @@ describe('Profile', () => {
 })
 
 describe('Account, signed out', () => {
+  it('offers a sign-in button for each configured provider', async () => {
+    mockFetch({ '/api/public/providers': { providers: ['twitch', 'dev'] }, '/api/me': 401 })
+
+    renderPage(<Account />, '/account')
+
+    // One button per door the api runs, in the api's order, and nothing else: Discord is
+    // not configured here, so no Discord button may appear.
+    expect(await screen.findByRole('link', { name: /Twitch/i })).toHaveAttribute(
+      'href',
+      '/auth/twitch/start?purpose=login',
+    )
+    expect(screen.getByRole('link', { name: /dev/i })).toHaveAttribute(
+      'href',
+      '/auth/dev/start?purpose=login',
+    )
+    expect(screen.queryByRole('link', { name: /Discord/i })).toBeNull()
+  })
+
+  it('shows the not-activated sentence only when the list is empty', async () => {
+    mockFetch({ '/api/public/providers': { providers: [] }, '/api/me': 401 })
+
+    renderPage(<Account />, '/account')
+
+    expect(await screen.findByText(/n’est pas activée/)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /se connecter avec/i })).toBeNull()
+  })
+
+  it('does not offer the dev door when the api does not list it', async () => {
+    // A dev build still asks the api: the build flag only decides what to say when the
+    // capability list cannot be read, never what to add to a list that was read.
+    vi.stubEnv('VITE_DEV_LOGIN', 'true')
+    mockFetch({ '/api/public/providers': { providers: ['twitch'] }, '/api/me': 401 })
+
+    renderPage(<Account />, '/account')
+
+    expect(await screen.findByRole('link', { name: /Twitch/i })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /dev/i })).toBeNull()
+    expect(screen.queryByText(/n’est pas activée/)).toBeNull()
+  })
+
   it('shows the sign-in panel on a 401 rather than an error', async () => {
     vi.stubEnv('VITE_DEV_LOGIN', 'true')
     stubFetch(() =>
@@ -567,6 +639,108 @@ describe('Account, signed in', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('offers only the dev door when the capability read fails', async () => {
+    // A 500 is not an empty answer: the page cannot know what runs, so it may only say what
+    // the build itself allows. It must not claim sign-in is off while the dev door is open.
+    vi.stubEnv('VITE_DEV_LOGIN', 'true')
+    mockFetch({ '/api/public/providers': 500, '/api/me': 401 })
+
+    renderPage(<Account />, '/account')
+
+    expect(
+      await screen.findByRole('link', { name: /compte de développement/i }),
+    ).toHaveAttribute('href', '/auth/dev/start?purpose=login')
+    expect(screen.queryByText(/n’est pas activée/)).toBeNull()
+    expect(screen.queryByRole('link', { name: /^Se connecter avec Twitch$/ })).toBeNull()
+  })
+
+  it('waits for the capability answer before offering an account to attach', async () => {
+    let release: (response: Response) => void = () => {}
+    const held = new Promise<Response>((resolve) => {
+      release = resolve
+    })
+    stubFetch((url) => (url === '/api/public/providers' ? held : jsonResponse(ME)))
+
+    renderPage(<Account />, '/account')
+
+    // The profile alone is enough to draw the page, but not enough to know which platforms
+    // can be attached: until the answer lands, a link would be a guess at the api's state.
+    expect(await screen.findByRole('heading', { name: 'Ashu' })).toBeInTheDocument()
+    expect(screen.getByText(/vérification des plateformes/i)).toBeInTheDocument()
+    expect(
+      screen.queryByRole('link', { name: /rattacher un compte/i }),
+    ).not.toBeInTheDocument()
+
+    release(jsonResponse({ providers: ['twitch', 'youtube'] }))
+
+    expect(
+      await screen.findByRole('link', { name: /rattacher un compte youtube/i }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('link', { name: /rattacher un compte discord/i }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/vérification des plateformes/i)).toBeNull()
+  })
+
+  it('states plainly that no door is available when the list holds only unknown names', async () => {
+    // A newer api can name a provider this bundle does not know how to draw. The name is
+    // dropped, and the visitor must still get an answer rather than a silent panel.
+    vi.stubEnv('VITE_DEV_LOGIN', 'false')
+    mockFetch({ '/api/public/providers': { providers: ['mystery'] }, '/api/me': 401 })
+
+    renderPage(<Account />, '/account')
+
+    expect(await screen.findByText(/n’est pas activée/)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /se connecter avec/i })).toBeNull()
+  })
+
+  it('offers only the providers this deployment runs as accounts to attach', async () => {
+    mockFetch({
+      '/api/public/providers': { providers: ['twitch', 'youtube'] },
+      '/api/me': ME,
+    })
+
+    renderPage(<Account />, '/account')
+
+    expect(
+      await screen.findByRole('link', { name: /rattacher un compte youtube/i }),
+    ).toHaveAttribute('href', '/auth/youtube/start?purpose=link')
+    expect(
+      screen.queryByRole('link', { name: /rattacher un compte discord/i }),
+    ).not.toBeInTheDocument()
+    // The dev door signs in; it is never a platform account to attach.
+    expect(
+      screen.queryByRole('link', { name: /rattacher un compte dev/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('says nothing can be attached when the deployment runs no platform', async () => {
+    mockFetch({ '/api/public/providers': { providers: [] }, '/api/me': ME })
+
+    renderPage(<Account />, '/account')
+
+    expect(
+      await screen.findByText(/aucune plateforme ne peut être rattachée/i),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('link', { name: /rattacher un compte/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('reads the capability list once, alongside the profile read', async () => {
+    const fetchMock = mockFetch({
+      '/api/public/providers': { providers: ['twitch', 'youtube'] },
+      '/api/me': ME,
+    })
+
+    renderPage(<Account />, '/account')
+
+    await screen.findByRole('heading', { name: 'Ashu' })
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url === '/api/public/providers'),
+    ).toHaveLength(1)
+  })
+
   it('states plainly that detaching forfeits the XP for good and that the level stays', async () => {
     const fetchMock = signedIn()
     const user = userEvent.setup()
@@ -581,14 +755,17 @@ describe('Account, signed in', () => {
     expect(
       within(panel).getByText(/ton niveau et ton xp maximal restent inchangés/i),
     ).toBeInTheDocument()
-    // Only the initial profile read has happened: nothing was sent yet.
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // Only the initial reads have happened: nothing was sent. The counts are per route,
+    // because the page reads both the profile and the capability list on load.
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/me')).toHaveLength(1)
+    expect(detachRequests(fetchMock)).toHaveLength(0)
 
     await user.click(within(panel).getByRole('button', { name: /le garder rattaché/i }))
     expect(
       screen.queryByRole('region', { name: /détacher ton compte twitch/i }),
     ).not.toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/me')).toHaveLength(1)
+    expect(detachRequests(fetchMock)).toHaveLength(0)
   })
 
   it('names the permanence of the forfeit for a later re-attach in the confirmation', async () => {
