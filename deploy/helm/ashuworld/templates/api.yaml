@@ -41,6 +41,13 @@ spec:
             # The pepper that makes an erased account unlinkable. Required: the api refuses
             # to start without it rather than writing an unkeyed value.
             {{- include "ashuworld.erasurePepperEnv" . | nindent 12 }}
+            # The sign-in provider's credentials, from the operator's Secret. Not a literal
+            # here: the client secret would then appear in `helm get manifest` and in every
+            # rollout's stored values. `with` skips the whole block when the helper has
+            # nothing to render, so the default install keeps a clean env list.
+            {{- with include "ashuworld.providerEnv" (dict "root" . "component" "api") }}
+            {{- . | nindent 12 }}
+            {{- end }}
             - name: PORT
               value: {{ .Values.api.port | quote }}
             # Derived from the ingress host: the cookie's Secure flag and every absolute

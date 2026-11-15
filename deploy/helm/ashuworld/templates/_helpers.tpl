@@ -90,6 +90,55 @@ would put the pepper into `helm get manifest` and the release's stored values.
 {{- end -}}
 
 {{/*
+The provider credentials, read from the operator's Secret. Defined once because the api and
+the worker read overlapping but different keys, and two hand-written lists in two templates
+would drift: the worker would gain a credential the api never got, or one of them would forget
+`optional: true`.
+
+The api reads the client pair; the worker reads that pair plus the channel's refresh token and
+the key that seals it. Every `secretKeyRef` is optional on purpose: an absent key is how the
+operator says "this provider is off", and the pod must still start. The channel login is the
+one value that is not a credential, so it is plain environment, and it is left out entirely
+when it is empty rather than rendered as an empty string that the code would have to reject.
+*/}}
+{{- define "ashuworld.providerEnv" -}}
+{{- $secretName := .root.Values.providers.secretName -}}
+{{- $channelLogin := .root.Values.providers.twitch.channelLogin -}}
+{{- if $secretName -}}
+- name: TWITCH_CLIENT_ID
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secretName }}
+      key: twitch-client-id
+      optional: true
+- name: TWITCH_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secretName }}
+      key: twitch-client-secret
+      optional: true
+{{- if eq .component "worker" }}
+- name: TWITCH_CHANNEL_REFRESH_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secretName }}
+      key: twitch-channel-token
+      optional: true
+- name: PLATFORM_TOKEN_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secretName }}
+      key: platform-token-key
+      optional: true
+{{- end -}}
+{{- end -}}
+{{- if $channelLogin }}
+- name: TWITCH_CHANNEL_LOGIN
+  value: {{ $channelLogin | quote }}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The URL the browser uses. Built from the ingress host rather than configured separately:
 two values that must agree are two values that will not, and PUBLIC_BASE_URL decides the
 Secure flag on the session cookie.
