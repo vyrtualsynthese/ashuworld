@@ -2,6 +2,7 @@ import type { Pool } from 'pg'
 import type { DiscoveredPerson } from '@ashuworld/providers'
 import type { WorkerEnv } from '../config.js'
 import type { Connector } from './types.js'
+import { realSleep, sendWithRateLimitRetry, type Sleep } from './httpRetry.js'
 import { getTwitchAccessToken } from './twitchToken.js'
 
 /**
@@ -19,7 +20,9 @@ import { getTwitchAccessToken } from './twitchToken.js'
  *
  * Any failure throws and the runner catches it per connector: a Twitch outage leaves the
  * other sources running and this one retries next tick. Pages yielded before the failure
- * are real followers and stay enqueued; the failed page yields nothing.
+ * are real followers and stay enqueued; the failed page yields nothing. A rate limit (429)
+ * is the one refusal that is not a failure: the connector waits what `Retry-After` asks and
+ * asks for the same page again, so a round that hits Twitch's limit still finishes.
  */
 
 const HELIX = 'https://api.twitch.tv/helix'
@@ -34,6 +37,8 @@ export interface TwitchConnectorOptions {
   pool: Pool
   env: WorkerEnv
   fetchImpl?: typeof fetch
+  /** The pause used between rate-limit retries; injected so a test does not wait. */
+  sleep?: Sleep
 }
 
 /** A required setting, or an error naming it. The connector is only built when config allowed it. */
@@ -69,6 +74,8 @@ interface UserEntry {
 
 interface HelixCall {
   fetchImpl: typeof fetch
+  /** The pause used between rate-limit retries. */
+  sleep: Sleep
   accessToken: string
   clientId: string
   /** A noun for the error message: which call Twitch refused. */
@@ -78,17 +85,22 @@ interface HelixCall {
 /**
  * A parsed Helix response.
  *
- * A non-2xx is the caller-side failure this connector reports: the status goes in the
- * message so an operator can tell an expired grant (401) from a rate limit (429) from an
- * outage (5xx). The body is a short detail, never a token.
+ * A rate limit is waited out inside `sendWithRateLimitRetry`; what reaches here is either a
+ * 2xx or a refusal worth reporting. The status goes in the message so an operator can tell
+ * an expired grant (401) from an outage (5xx); a 429 still here means three waits were not
+ * enough. The body is a short detail, never a token.
  */
 async function helixJson<T>(call: HelixCall, url: URL): Promise<T> {
-  const response = await call.fetchImpl(url, {
-    headers: {
-      'Client-Id': call.clientId,
-      Authorization: `Bearer ${call.accessToken}`,
-    },
-  })
+  const response = await sendWithRateLimitRetry(
+    () =>
+      call.fetchImpl(url, {
+        headers: {
+          'Client-Id': call.clientId,
+          Authorization: `Bearer ${call.accessToken}`,
+        },
+      }),
+    call.sleep,
+  )
   const raw = await response.text()
 
   if (!response.ok) {
@@ -189,6 +201,7 @@ function followerToPerson(row: FollowerRow): DiscoveredPerson {
 export function createTwitchConnector(options: TwitchConnectorOptions): Connector {
   const { pool, env } = options
   const fetchImpl = options.fetchImpl ?? fetch
+  const sleep = options.sleep ?? realSleep
 
   const clientId = required(env.TWITCH_CLIENT_ID, 'TWITCH_CLIENT_ID')
   const clientSecret = required(env.TWITCH_CLIENT_SECRET, 'TWITCH_CLIENT_SECRET')
@@ -205,10 +218,12 @@ export function createTwitchConnector(options: TwitchConnectorOptions): Connecto
         clientSecret,
         key,
         fetchImpl,
+        sleep,
         ...(envToken === undefined ? {} : { envToken }),
       })
       const call: HelixCall = {
         fetchImpl,
+        sleep,
         accessToken,
         clientId,
         what: 'follower list',

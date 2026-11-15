@@ -1,6 +1,7 @@
 import type { Pool } from 'pg'
 import { readPlatformToken, writePlatformToken } from '@ashuworld/ledger'
 import { openToken, sealToken } from '@ashuworld/providers'
+import { realSleep, sendWithRateLimitRetry, type Sleep } from './httpRetry.js'
 
 /**
  * The channel owner's grant, from the sealed row to a usable access token.
@@ -32,6 +33,8 @@ export interface TwitchTokenDeps {
   /** The base64 `PLATFORM_TOKEN_KEY` the row is sealed with. */
   key: string
   fetchImpl?: typeof fetch
+  /** The pause used between rate-limit retries; injected so a test does not wait. */
+  sleep?: Sleep
   /** Milliseconds. Injected so a test can age the cache instead of sleeping an hour. */
   now?: () => number
 }
@@ -121,6 +124,7 @@ function unsealOrThrow(sealed: string, key: string): string {
 
 interface RefreshInput {
   fetchImpl: typeof fetch
+  sleep: Sleep
   clientId: string
   clientSecret: string
   refreshToken: string
@@ -137,21 +141,28 @@ interface RefreshedGrant {
 /**
  * Spends the refresh token for an access token.
  *
+ * A rate-limited refresh is waited out like any other Twitch call: the grant endpoint
+ * answers 429 too, and an aborted refresh would fail the whole discovery round.
+ *
  * A missing `expires_in` is treated as "no cache": the next call refreshes again. That is
  * slower but never serves a token past its life, which is the failure that would otherwise
  * look like a broken connector.
  */
 async function refreshGrant(input: RefreshInput): Promise<RefreshedGrant> {
-  const response = await input.fetchImpl(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: input.clientId,
-      client_secret: input.clientSecret,
-      grant_type: 'refresh_token',
-      refresh_token: input.refreshToken,
-    }),
-  })
+  const response = await sendWithRateLimitRetry(
+    () =>
+      input.fetchImpl(TOKEN_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: input.clientId,
+          client_secret: input.clientSecret,
+          grant_type: 'refresh_token',
+          refresh_token: input.refreshToken,
+        }),
+      }),
+    input.sleep,
+  )
   const raw = await response.text()
 
   if (!response.ok) {
@@ -195,6 +206,7 @@ async function refreshGrant(input: RefreshInput): Promise<RefreshedGrant> {
 export async function getTwitchAccessToken(deps: TwitchTokenDeps): Promise<string> {
   const now = deps.now ?? Date.now
   const fetchImpl = deps.fetchImpl ?? fetch
+  const sleep = deps.sleep ?? realSleep
 
   const sealed = await readPlatformToken(deps.pool, 'twitch')
   const refreshToken =
@@ -206,6 +218,7 @@ export async function getTwitchAccessToken(deps: TwitchTokenDeps): Promise<strin
 
   const refreshed = await refreshGrant({
     fetchImpl,
+    sleep,
     clientId: deps.clientId,
     clientSecret: deps.clientSecret,
     refreshToken,
