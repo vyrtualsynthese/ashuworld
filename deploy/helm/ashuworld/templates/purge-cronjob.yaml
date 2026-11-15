@@ -58,9 +58,10 @@ spec:
               command: ["node", "dist/worker.js", "purge"]
               env:
                 {{- include "ashuworld.databaseUrlEnv" . | nindent 16 }}
-                # The pepper is not used to delete, but the pass reads identities the erasure
-                # wrote: without it a run could not tell a keyed value from a corrupt one, so
-                # the same Secret the api and worker read is mounted here.
+                # The pepper is not a decryption key, but the pass uses it: `purgeBatch` hands it
+                # to the erasure helpers, which key the stored pseudonym and may complete an
+                # erasure while the batch runs. So the pass needs the same Secret the api and
+                # worker read, or it would delete against a key nothing can re-derive.
                 {{- include "ashuworld.erasurePepperEnv" . | nindent 16 }}
                 # The confirm token comes from a Secret, never from an inline value: a typo in
                 # the chart cannot arm a deletion, and `helm get manifest` does not show it.

@@ -63,6 +63,7 @@ grep -q 'kind: Job' <<<"$default_out" || fail "no migrate Job"
 
 grep -q 'alpha-reset' <<<"$default_out" && fail "alpha reset job rendered without alphaReset.enabled"
 grep -q 'alpha-reset' <<<"$reset_out" || fail "alpha reset job missing when alphaReset.enabled=true"
+grep -q 'reset-ashuworld' <<<"$reset_out" || fail "the alpha reset confirm Secret is missing"
 
 # --- the level recompute is gated ----------------------------------------------------
 
@@ -89,6 +90,19 @@ grep -q 'purge-ashuworld' <<<"$purge_out" || fail "purge confirm Secret has no v
 # erasure with no pepper would write a value nothing can re-derive.
 test "$(grep -c 'ERASURE_PEPPER' <<<"$purge_out")" -ge 3 ||
   fail "an erasing workload has no pepper (expected api, worker and purge)"
+
+# The default render has no CronJob, so the connection-string and hardening checks above never
+# see one. Extract just the CronJob document — stopping at the next `---` — and assert the same
+# promises on it: reading to the end of the stream would let the worker Deployment answer for it.
+purge_job="$(awk '/^kind: CronJob/{f=1} f && /^---$/{exit} f' <<<"$purge_out")"
+grep -qi 'postgres://[^" ]*:[^" ]*@' <<<"$purge_job" && fail "connection string rendered into the purge CronJob"
+for guard in 'readOnlyRootFilesystem: true' 'allowPrivilegeEscalation: false' 'drop:'; do
+  grep -q "$guard" <<<"$purge_job" || fail "the purge CronJob is missing $guard"
+done
+# The pepper must come from the Secret, not a value: an inline pepper cannot re-derive a key.
+grep -A3 'name: ERASURE_PEPPER' <<<"$purge_job" | grep -q 'secretKeyRef' ||
+  fail "the purge pepper is not read from a Secret"
+grep -q 'ashuworld-purge' <<<"$purge_job" || fail "the purge CronJob does not reference its confirm Secret"
 
 # --- secrets stay in Secrets ---------------------------------------------------------
 
