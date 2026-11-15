@@ -1,5 +1,8 @@
 # AshuWorld Foundation Implementation Plan
 
+> Status: historical. Implemented in 0.1.0; kept as the record of the build order. Deviation:
+> @fastify/static was never added; the web is served by nginx.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the part of AshuWorld that everything else attaches to: the ledger, the fan account with link/detach, sessions, and the public ladder — deployable to Kubernetes before any platform adapter exists.
