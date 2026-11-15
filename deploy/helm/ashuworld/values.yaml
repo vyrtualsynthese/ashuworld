@@ -34,7 +34,9 @@ api:
   env:
     # The dev sign-in door is a separate switch from the web build flag, because the api
     # decides whether /auth/dev/start exists and the web bundle decides whether to show the
-    # button. Turning this on is the only way to sign in until a real provider lands.
+    # button. It is off by default, and a real deployment leaves it off: Twitch signs fans in
+    # with its own keys, and a deployment with no provider configured tells the fan that no
+    # sign-in is available.
     ALLOW_DEV_LOGIN: "false"
   resources:
     requests:
