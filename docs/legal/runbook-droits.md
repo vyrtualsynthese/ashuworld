@@ -96,28 +96,40 @@ Si aucun CronJob de purge n'apparaît, deux voies :
 
 ### Le Job autonome
 
-Il porte trois variables, chacune lue dans un Secret existant. Les noms viennent des valeurs du
-chart : ne pas les deviner, lire `helm get values <release> -n <namespace>` et recopier.
+Il porte trois variables, chacune lue dans un Secret existant.
 
-| Variable | Valeur qui nomme le Secret | Valeur qui nomme la clé |
+| Variable | Secret | Clé |
 |---|---|---|
-| `DATABASE_URL` | `postgres.secretName` | `postgres.urlKey` |
-| `ERASURE_PEPPER` | `erasure.pepperSecretName` | `erasure.pepperKey` |
-| `PURGE_CONFIRM` | `purge.secretName`, ou le Secret créé ci-dessous | `purge.secretKey`, ou `confirm` |
+| `DATABASE_URL` | celui que nomme `postgres.secretName` | `postgres.urlKey` |
+| `ERASURE_PEPPER` | celui que nomme `erasure.pepperSecretName` | `erasure.pepperKey` |
+| `PURGE_CONFIRM` | le Secret du CronJob créé par le chart, ou `droits-purge-confirm` | `purge.secretKey`, ou `confirm` |
 
-`PURGE_CONFIRM` n'est pas une authentification : c'est une chaîne fixe, `purge-ashuworld`, qui
-arme la suppression. Le Secret qui la porte existe pour qu'une faute de frappe ne puisse pas
-lancer une purge, rien de plus. Le chart ne crée le sien que lorsque le CronJob est activé ; si
-aucun Secret ne porte déjà la valeur, en créer un, une fois, avec un nom explicite :
+Les deux premiers noms se lisent dans `helm get values <release> -n <namespace>`. Le troisième
+n'est pas déductible : `purge.secretName` est vide par défaut et le nom que le chart calcule
+n'existe que si le CronJob est activé. Lire les Secrets présents dans le cluster :
+
+```bash
+kubectl -n <namespace> get secret
+```
+
+Deux cas seulement, tous deux exécutables : le Secret créé par le chart est dans cette liste, on
+prend son nom et la clé `purge.secretKey` ; s'il n'y est pas, on crée le nôtre avec la clé
+`confirm` :
 
 ```bash
 kubectl -n <namespace> create secret generic droits-purge-confirm \
   --from-literal=confirm=purge-ashuworld
 ```
 
+`PURGE_CONFIRM` n'est pas une authentification : c'est une chaîne fixe, `purge-ashuworld`, qui
+arme la suppression. Le Secret qui la porte existe pour qu'une faute de frappe ne puisse pas
+lancer une purge, rien de plus.
+
 Puis appliquer ce Job. L'image est celle du worker (`worker.image.repository`, avec
-`worker.image.tag`, ou `image.tag` du chart quand le tag du worker est vide) ; elle tourne déjà en
-uid 10001, donc le Job est non-root sans `securityContext` supplémentaire.
+`worker.image.tag`, ou `image.tag` du chart quand le tag du worker est vide). Le `securityContext`
+est celui du CronJob du chart : un espace de noms qui applique le profil restreint de Pod Security
+refuse un Job qui l'omet. Si l'image est privée, ajouter aussi les `imagePullSecrets` du chart
+(`imagePullSecrets` dans les valeurs).
 
 ```yaml
 apiVersion: batch/v1
@@ -129,10 +141,21 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      # imagePullSecrets: [{ name: <imagePullSecrets du chart> }]   # seulement si l'image est privée
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: purge
           image: <worker.image.repository>:<worker.image.tag ou image.tag>
           command: ["node", "dist/worker.js", "purge", "--dry-run"]
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           env:
             - name: DATABASE_URL
               valueFrom: { secretKeyRef: { name: <postgres.secretName>, key: <postgres.urlKey> } }
@@ -142,7 +165,21 @@ spec:
               valueFrom: { secretKeyRef: { name: <Secret de PURGE_CONFIRM>, key: <confirm ou purge.secretKey> } }
 ```
 
-Le Job commence par `purge --dry-run` : lire les compteurs, puis retirer `--dry-run` et relancer.
+Le modèle de pod d'un Job est immuable : on ne retire pas `--dry-run` sur un Job déjà créé, on le
+supprime et on en crée un autre. Chaque exécution est donc un Job neuf, sous le même nom.
+
+```bash
+# A. Répétition à blanc : lire les compteurs, ne rien supprimer.
+kubectl apply -n <namespace> -f droits-purge.yaml
+kubectl logs -f job/droits-purge-manuel -n <namespace>
+kubectl -n <namespace> delete job droits-purge-manuel
+
+# B. Exécution réelle : retirer --dry-run du manifeste, puis recréer le Job.
+kubectl apply -n <namespace> -f droits-purge.yaml
+kubectl logs -f job/droits-purge-manuel -n <namespace>
+kubectl -n <namespace> delete job droits-purge-manuel
+```
+
 Pour une demande de droits, remplacer la commande par `export-fan`, `erase-fan`,
 `erase-identity` ou `erase-identity-id`.
 
