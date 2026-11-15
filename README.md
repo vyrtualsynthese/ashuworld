@@ -60,8 +60,9 @@ docker compose up --build
 Then open <http://localhost:8080>.
 
 - **Sign in:** the account page offers a dev sign-in (the `dev` provider). Type a handle and you
-  get a Dachi with no platform involved. It exists so the flow is testable before the real
-  Twitch, Discord and YouTube applications exist, and `ALLOW_DEV_LOGIN` is off everywhere else.
+  get a Dachi with no platform involved. It exists so the flow is testable without a platform
+  application, and `ALLOW_DEV_LOGIN` is off everywhere else. Twitch is the real door; see
+  [Platform keys](#platform-keys).
 - **Ladder:** <http://localhost:8080/ladder> starts empty and fills in as Dachis earn.
 - **Database:** Postgres is on `localhost:5432`, user, password and database all `ashu`.
 - **Stop:** `docker compose down`. Add `-v` to throw the database away and start clean.
@@ -116,6 +117,72 @@ database, not only the invented rows.
 
 The api and worker read `.env` when it is there and ignore it when it is not; `.env.example` lists
 every name they understand, and `.env` is git-ignored.
+
+#### Platform keys
+
+Twitch is the first real door. A fan signs in with their own Twitch account, and the sign-in asks
+for `user:read:follows` — the list of channels that account follows, and nothing else. The worker
+does the opposite read: it lists the followers of *your* channel, which Twitch only answers to an
+account that may moderate it. So the channel needs its own one-time authorization, done by the
+channel owner. `.env.example` carries every name below.
+
+1. Create an application at <https://dev.twitch.tv/console/apps>.
+2. Register two OAuth redirect URLs. Twitch compares them character for character:
+   - `<PUBLIC_BASE_URL>/auth/twitch/callback` for the fan sign-in. The dev compose file sets
+     `PUBLIC_BASE_URL` to `http://localhost:5173`, so register
+     `http://localhost:5173/auth/twitch/callback`; the production host registers its own.
+   - `http://localhost:17563/twitch/callback`, used only by the one-time channel authorization
+     below. It is loopback, so it is the same string on every machine.
+
+3. Put the client id and secret in `.env` as `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET`. Both
+   or neither: one without the other stops startup and names the missing half.
+
+4. Set `TWITCH_CHANNEL_LOGIN` to the channel's login — `ashuworld`, the lowercase name in the
+   channel URL, not the display name — and generate the key that seals stored grants:
+
+   ```bash
+   openssl rand -base64 32        # prints the value for PLATFORM_TOKEN_KEY
+   ```
+
+5. Authorize the channel, as the channel owner. The command reads its two variables from its own
+   environment, not from `.env`, so source the file first (that exports every line in it):
+
+   ```bash
+   set -a; . ./.env; set +a
+   pnpm --filter @ashuworld/worker twitch-authorize
+   ```
+
+   It prints a URL and waits for the redirect on port 17563, bound to `127.0.0.1`. Open it in a
+   browser as the account that owns the channel — not a moderator and not a bot — because it asks
+   for `moderator:read:followers`, the permission that lets the worker read the follower list. If
+   the browser shows a connection error, open the URL again. The command writes nothing: it prints
+   `TWITCH_CHANNEL_REFRESH_TOKEN=...` and exits.
+
+6. Paste that line into `.env` and recreate both processes. The variables are not shared: the api
+   reads `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET` and `TWITCH_CHANNEL_LOGIN` for the sign-in
+   door; the worker reads those three plus `TWITCH_CHANNEL_REFRESH_TOKEN` and `PLATFORM_TOKEN_KEY`
+   for the follower poll. `PLATFORM_CONNECTORS` is a worker setting only, set to `twitch` (or
+   `stub,twitch`, which also needs `ALLOW_STUB_CONNECTORS=true`).
+
+   ```bash
+   docker compose -f compose.dev.yaml up -d api worker
+   ```
+
+   Use `up -d`, not `restart`: Compose reads `.env` when it creates a container, so `restart`
+   brings the old environment back, with no error to warn you.
+
+From then on the worker reads the follower list every `SYNC_INTERVAL_SECONDS` (900 by default)
+and queues a `twitch.follow` action for each follower. That action pays a one-time bonus the first
+time the follow is verified — at sign-in, or at the next poll for a fan who already followed — and
+the monthly amount while the follow holds, once per month (50 and 5 XP today; the `/xp` page lists
+the live values). A fan who signs in without following still gets an account and a session; they
+earn no follow XP until a poll sees them following.
+
+Keep `PLATFORM_TOKEN_KEY` stable once it has been used. The channel grant is stored sealed with
+it, so a different key cannot open that grant: the follower poll stops and the error names the
+variable. Running `twitch-authorize` again does not repair it while the old row exists, because a
+grant that will not open is never overwritten from the environment. Put the previous key back, or
+delete the `twitch` row in `platform_tokens` and authorize the channel again.
 
 ### Validate before pushing
 
@@ -190,10 +257,12 @@ next to the bundle.
 
 ## Where we are going
 
-The foundation is in: ledger, accounts, ladder, worker, images and chart. Next are the platform
-adapters (Twitch EventSub, Discord membership, YouTube subscription through each Dachi's own
-grant), the operator tools (punishments, the audited account repair), and the bot and overlay
-surfaces that read the public profile API.
+The foundation is in: ledger, accounts, ladder, worker, images and chart. Twitch is the first real
+adapter in: a fan signs in with their own account and the follower poll builds the ladder from the
+channel's follower list. Next are the remaining adapters (Twitch EventSub for live chat and channel
+events, Discord membership, YouTube subscription through each Dachi's own grant), the operator
+tools (punishments, the audited account repair), and the bot and overlay surfaces that read the
+public profile API.
 
 ## Contributing
 
