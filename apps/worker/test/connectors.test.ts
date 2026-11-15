@@ -1,7 +1,18 @@
+import { randomBytes } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
+import type { Pool } from 'pg'
 import { loadWorkerEnv } from '../src/config.js'
 import { createConnectors } from '../src/connectors/index.js'
 import { createStubConnector } from '../src/connectors/stub.js'
+
+/**
+ * The stub never reads the pool, but the factory takes one because the Twitch connector
+ * does. A test that builds only sources which ignore it should not need a database.
+ */
+const unusedPool = {} as Pool
+
+/** A valid key for `PLATFORM_TOKEN_KEY`: the config checks it is 32 bytes, not its value. */
+const tokenKey = randomBytes(32).toString('base64')
 
 async function collect(people: number) {
   const out = []
@@ -47,7 +58,7 @@ describe('createConnectors', () => {
       STUB_PEOPLE: '5',
     })
 
-    const connectors = createConnectors(env)
+    const connectors = createConnectors(env, unusedPool)
     expect(connectors).toHaveLength(1)
     const connector = connectors[0]
     if (connector === undefined) throw new Error('expected one connector')
@@ -58,7 +69,41 @@ describe('createConnectors', () => {
     expect(people).toHaveLength(5)
   })
 
+  it('builds the Twitch connector when the environment names it', () => {
+    const env = loadWorkerEnv({
+      DATABASE_URL: 'postgres://x',
+      PLATFORM_CONNECTORS: 'twitch',
+      TWITCH_CLIENT_ID: 'id',
+      TWITCH_CLIENT_SECRET: 'secret',
+      TWITCH_CHANNEL_LOGIN: 'channel',
+      TWITCH_CHANNEL_REFRESH_TOKEN: 'refresh',
+      PLATFORM_TOKEN_KEY: tokenKey,
+    })
+
+    // Building it must not touch the network; the first discovery round is what refreshes.
+    expect(createConnectors(env, unusedPool).map((connector) => connector.name)).toEqual(['twitch'])
+  })
+
+  it('builds every named connector in the order the environment lists them', () => {
+    const env = loadWorkerEnv({
+      DATABASE_URL: 'postgres://x',
+      PLATFORM_CONNECTORS: 'twitch,stub',
+      ALLOW_STUB_CONNECTORS: 'true',
+      STUB_PEOPLE: '2',
+      TWITCH_CLIENT_ID: 'id',
+      TWITCH_CLIENT_SECRET: 'secret',
+      TWITCH_CHANNEL_LOGIN: 'channel',
+      TWITCH_CHANNEL_REFRESH_TOKEN: 'refresh',
+      PLATFORM_TOKEN_KEY: tokenKey,
+    })
+
+    expect(createConnectors(env, unusedPool).map((connector) => connector.name)).toEqual([
+      'twitch',
+      'stub',
+    ])
+  })
+
   it('builds nothing when the environment names no connector', () => {
-    expect(createConnectors(loadWorkerEnv({ DATABASE_URL: 'postgres://x' }))).toEqual([])
+    expect(createConnectors(loadWorkerEnv({ DATABASE_URL: 'postgres://x' }), unusedPool)).toEqual([])
   })
 })

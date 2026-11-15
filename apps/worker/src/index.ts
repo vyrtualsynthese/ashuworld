@@ -51,7 +51,7 @@ async function main(argv: readonly string[]): Promise<number> {
   const cfg = loadWorkerGameConfig()
   const pool = createPool(env.DATABASE_URL)
   const processors = createProcessors(cfg)
-  const connectors = createConnectors(env)
+  const connectors = createConnectors(env, pool)
 
   logConnectors(connectors.map((connector) => connector.name))
   if (env.PLATFORM_CONNECTORS.includes('stub')) warnStub(env.STUB_PEOPLE)
