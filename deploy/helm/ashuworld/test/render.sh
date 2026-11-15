@@ -91,8 +91,8 @@ grep -q 'purge-ashuworld' <<<"$purge_out" || fail "purge confirm Secret has no v
 test "$(grep -c 'ERASURE_PEPPER' <<<"$purge_out")" -ge 3 ||
   fail "an erasing workload has no pepper (expected api, worker and purge)"
 
-# The default render has no CronJob, so the connection-string and hardening checks above never
-# see one. Extract just the CronJob document — stopping at the next `---` — and assert the same
+# The chart-wide checks below run on the default render, which holds no CronJob, so the CronJob
+# needs its own. Extract just that document — stopping at the next `---` — and assert the same
 # promises on it: reading to the end of the stream would let the worker Deployment answer for it.
 purge_job="$(awk '/^kind: CronJob/{f=1} f && /^---$/{exit} f' <<<"$purge_out")"
 grep -qi 'postgres://[^" ]*:[^" ]*@' <<<"$purge_job" && fail "connection string rendered into the purge CronJob"
@@ -100,9 +100,14 @@ for guard in 'readOnlyRootFilesystem: true' 'allowPrivilegeEscalation: false' 'd
   grep -q "$guard" <<<"$purge_job" || fail "the purge CronJob is missing $guard"
 done
 # The pepper must come from the Secret, not a value: an inline pepper cannot re-derive a key.
+# The named Secret is asserted too, because the CronJob's own metadata.name would otherwise
+# satisfy a bare name grep and the check would prove nothing.
 grep -A3 'name: ERASURE_PEPPER' <<<"$purge_job" | grep -q 'secretKeyRef' ||
   fail "the purge pepper is not read from a Secret"
-grep -q 'ashuworld-purge' <<<"$purge_job" || fail "the purge CronJob does not reference its confirm Secret"
+grep -A4 'name: ERASURE_PEPPER' <<<"$purge_job" | grep -q 'name: ashuworld-erasure' ||
+  fail "the purge CronJob does not read the erasure Secret"
+grep -A4 'name: PURGE_CONFIRM' <<<"$purge_job" | grep -q 'name: ashuworld-purge' ||
+  fail "the purge CronJob does not reference its confirm Secret"
 
 # --- secrets stay in Secrets ---------------------------------------------------------
 
