@@ -7,6 +7,7 @@ import {
   createFan,
   detachIdentity,
   ensureIdentity,
+  eraseFan,
   linkIdentity,
   withTransaction,
   type Queryable,
@@ -847,6 +848,76 @@ describe('GET /auth/:provider/callback: login', () => {
       // Only the session from before the detach still exists.
       expect(await count('sessions')).toBe(1)
       expect(first.res.statusCode).toBe(302)
+    })
+  })
+})
+
+describe('returning erased account', () => {
+  it('starts over at zero with its one-time keys still spent', async () => {
+    // The end-to-end proof the Task 9 review asked for: an erased fan who signs in again
+    // gets a fresh account at zero, on the identity row they already had, and the earns
+    // that row already spent cannot be paid a second time.
+    await withApp(async (app) => {
+      const fanId = await seedFan('ada')
+      await seedDevIdentity(fanId, 'ada')
+      const identity = await identityRow('dev:ada')
+      const earned = await withTransaction(db.pool, (tx) =>
+        awardOnce(tx, {
+          identityId: identity.id,
+          provider: 'dev',
+          actionKey: 'dev.login',
+          amount: 50,
+          idempotencyKey: 'dev-earn-ada',
+          cfg,
+        }),
+      )
+      expect(earned.awarded).toBe(true)
+
+      await withTransaction(db.pool, (tx) => eraseFan(tx, { fanId, pepper: 'test-pepper' }))
+
+      const { cookie, res } = await login(app, 'ada')
+
+      expect(res.statusCode).toBe(302)
+      expect(locationOf(res)).toBe('/account')
+      expect(sessionSetCookie(res)).toBeDefined()
+
+      const me = await app.inject({ method: 'GET', url: '/api/me', headers: cookieHeader(cookie) })
+      expect(me.statusCode).toBe(200)
+      const profile = me.json() as { id: string; handle: string; balance: number; level: number }
+      expect(profile.id).not.toBe(fanId)
+      expect(profile.handle).toBe('ada')
+      expect(profile.balance).toBe(0)
+      expect(profile.level).toBe(0)
+
+      // The same identity row, re-attached: no second row, and the mark that keeps it off
+      // the free-standing ladder is still there.
+      expect(await count('provider_identities')).toBe(1)
+      const { rows: identityRows } = await db.pool.query<{
+        id: string
+        fan_id: string | null
+        first_linked_at: Date | null
+      }>('select id, fan_id, first_linked_at from provider_identities where id = $1', [identity.id])
+      expect(identityRows[0]?.id).toBe(identity.id)
+      expect(identityRows[0]?.fan_id).toBe(profile.id)
+      expect(identityRows[0]?.first_linked_at).not.toBeNull()
+
+      const { rows: fanRows } = await db.pool.query<{ terms_version: string | null }>(
+        'select terms_version from fans where id = $1',
+        [profile.id],
+      )
+      expect(fanRows[0]?.terms_version).toBe('2026-11-14')
+
+      const again = await withTransaction(db.pool, (tx) =>
+        awardOnce(tx, {
+          identityId: identity.id,
+          provider: 'dev',
+          actionKey: 'dev.login',
+          amount: 50,
+          idempotencyKey: 'dev-earn-ada-replay',
+          cfg,
+        }),
+      )
+      expect(again).toMatchObject({ awarded: false, reason: 'action_spent' })
     })
   })
 })

@@ -4,6 +4,7 @@ import type { GameConfig } from '@ashuworld/gameconfig'
 import type { IdentityProfile } from '@ashuworld/providers'
 import {
   ensureIdentity,
+  findIdentityForLogin,
   linkIdentity,
   recordTermsAcceptance,
   touchLastSeen,
@@ -154,14 +155,29 @@ type LinkOutcome =
   | { kind: 'already_owned' }
 
 /**
+ * The prefix `erasedExternalId` puts on an anonymised provider id. An identity carrying it
+ * stands for the same provider account but no longer names it, so it is the one case where a
+ * detached identity may be signed into instead of sent to `/account?reattach=`.
+ */
+const ERASED_EXTERNAL_ID_PREFIX = 'erased:'
+
+/**
  * Resolves the fan behind a provider identity, in the order the plan fixes:
  *
  * 1. the identity is attached to a fan → sign that fan in;
- * 2. the identity exists but is detached (`first_linked_at` set) → send the fan to
- *    `/account?reattach=<provider>` and attach nothing, because signing in would silently
- *    undo a detach the fan chose;
- * 3. the identity is unknown → create a fan from the display handle, attach the identity
+ * 2. the identity exists, is detached (`first_linked_at` set) and is not erased → send the
+ *    fan to `/account?reattach=<provider>` and attach nothing, because signing in would
+ *    silently undo a detach the fan chose;
+ * 3. the identity exists, is detached and is erased → the person asked for their account to
+ *    go away and is now signing in again: give them a new account on their old identity
+ *    row, at zero, with every one-time key that row already spent still spent;
+ * 4. the identity is unknown → create a fan from the display handle, attach the identity
  *    and sign the fan in.
+ *
+ * The identity is found before it is locked with `findIdentityForLogin`, which also matches
+ * an erased row through its peppered pseudonym. Without that lookup the same person coming
+ * back would look like a stranger and get a second identity row — and a second welcome
+ * bonus. Only when neither lookup finds anything is the row created with `ensureIdentity`.
  *
  * The identity row is locked before the decision, so two simultaneous first logins cannot
  * both see "unknown" and create two fans: the second waits, then sees the first fan and
@@ -180,29 +196,49 @@ async function resolveLogin(
   termsVersion: string | null,
 ): Promise<LoginOutcome> {
   return withTransaction(deps.pool, async (tx) => {
-    const identity = await ensureIdentity(tx, profile)
+    const erasedMatch = await findIdentityForLogin(tx, {
+      provider: profile.provider,
+      externalId: profile.externalId,
+      pepper: deps.env.ERASURE_PEPPER,
+    })
+    const identityId = erasedMatch?.id ?? (await ensureIdentity(tx, profile)).id
 
-    const { rows } = await tx.query<{ fan_id: string | null; first_linked_at: Date | null }>(
-      `select fan_id, first_linked_at
+    const { rows } = await tx.query<{
+      fan_id: string | null
+      first_linked_at: Date | null
+      external_id: string
+    }>(
+      `select fan_id, first_linked_at, external_id
          from provider_identities
         where id = $1
         for update`,
-      [identity.id],
+      [identityId],
     )
     const row = rows[0]
     if (row === undefined) {
-      throw new Error(`resolveLogin: provider identity ${identity.id} vanished while it was locked`)
+      throw new Error(`resolveLogin: provider identity ${identityId} vanished while it was locked`)
     }
 
     let fanId = row.fan_id
     if (fanId === null) {
-      if (row.first_linked_at !== null) return { kind: 'reattach' }
+      const erased = row.external_id.startsWith(ERASED_EXTERNAL_ID_PREFIX)
+      // A detached identity the fan still owns is theirs to re-attach; an erased one has no
+      // account left to return to, so the sign-in is a new start rather than a re-attach.
+      if (!erased && row.first_linked_at !== null) return { kind: 'reattach' }
 
       const fan = await createFanWithUniqueHandle(tx, {
         displayHandle: profile.displayHandle,
         displayName: profile.displayName,
       })
-      const linked = await linkIdentity(tx, { fanId: fan.id, identityId: identity.id, cfg: deps.cfg })
+      if (erased) {
+        // Erasure replaced the handle with a neutral placeholder; the current profile is
+        // what this identity represents now, so the new account carries its real name.
+        await tx.query('update provider_identities set display_handle = $2 where id = $1', [
+          identityId,
+          profile.displayHandle,
+        ])
+      }
+      const linked = await linkIdentity(tx, { fanId: fan.id, identityId, cfg: deps.cfg })
       if (!linked.ok) {
         // The row is locked and the fan is brand new, so nothing can have taken either
         // side of the link. Reaching here means the ledger no longer matches this code.
