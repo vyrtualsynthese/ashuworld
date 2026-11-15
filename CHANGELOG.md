@@ -21,15 +21,14 @@ the data is expected to be wiped before launch.
   `purge`, the gated daily purge CronJob and the `ERASURE_PEPPER` Secret. Erasure anonymises the
   rows and keeps the one-time keys spent, so an erased account cannot be re-linked.
 - `docs/legal/`: the processing register, the rights runbook and the compliance map.
-- CI pinning of every action and image, the Helm checksum check, the digest-pinned chart-check
-  image, and `pnpm audit --prod`.
+- CI hardening: every GitHub Action pinned by commit SHA, the Helm tarball checksum-verified
+  before extraction, the chart-check image pinned by digest, and `pnpm audit --prod` in the
+  `verify` job.
 
 ### Changed
 
 - The public profile and the ladder no longer publish the account's database id.
 - The auth rate limit applies per route instead of over one shared counter.
-- The docs record the two database ports: `5432` is the local Compose stack and `55432` is the
-  dedicated test database.
 
 ### Planned
 
