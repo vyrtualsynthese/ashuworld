@@ -36,6 +36,7 @@ export {
 } from './monthly.js'
 export { HandleTakenError, createFan, type CreateFanInput } from './fans.js'
 export { recordTermsAcceptance, touchLastSeen } from './consent.js'
+export { readPlatformToken, writePlatformToken } from './platformTokens.js'
 export {
   detachIdentity,
   linkIdentity,

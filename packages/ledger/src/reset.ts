@@ -87,7 +87,10 @@ function requireConfirmation(): void {
  *
  * `fans` and `_migrations` are deliberately not truncated. Truncating fans would cascade
  * into the very tables above and delete the accounts this operation exists to preserve;
- * `_migrations` is the schema's own history, not game data.
+ * `_migrations` is the schema's own history, not game data. `platform_tokens` stays too:
+ * the channel owner's grant is operator configuration, loaded once through the
+ * authorization command, not fan data. Wiping it would break sign-in and follow discovery
+ * until an operator re-ran that command, which is not what "reset the alpha game" means.
  *
  * The confirmation is checked before `withTransaction`, so a refused call never takes a
  * connection. The log line carries the game config version the wipe ran against, because
