@@ -112,8 +112,8 @@ function unsealOrThrow(sealed: string, key: string): string {
     return openToken(sealed, key)
   } catch (error) {
     throw new Error(
-      'the stored Twitch grant cannot be opened; ' +
-        'set a matching PLATFORM_TOKEN_KEY or run twitch-authorize again',
+      'the stored Twitch grant cannot be opened; set the matching PLATFORM_TOKEN_KEY, or ' +
+        'delete the stored twitch row in platform_tokens and authorize the channel again',
       { cause: error },
     )
   }
