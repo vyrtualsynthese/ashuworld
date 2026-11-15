@@ -58,6 +58,11 @@ Toutes vivent dans `apps/worker/src/cli.ts` et prennent la forme
 | `erase-identity-id <uuid>` | La même chose, adressée par l'identifiant que la commande précédente a listé. | `ERASURE_PEPPER` obligatoire ; refuse un identifiant qui n'est pas un UUID, une ligne absente, une identité encore rattachée. |
 | `purge [--dry-run]` | Applique les fenêtres de conservation (voir le registre). Sans argument, efface ; avec `--dry-run`, compte sans écrire. | `PURGE_CONFIRM` doit valoir exactement `purge-ashuworld`. |
 
+L'export ne contient pas l'identifiant du compte chez la plateforme (l'identifiant interne que
+Twitch, Google ou Discord attribue à ce compte) : il n'y a que la plateforme, le handle affiché et
+la date de rattachement, par conception. Si la personne veut cet identifiant, la plateforme
+elle-même le lui fournit, sur la page de compte du service concerné.
+
 Quand `erase-identity` répond que plusieurs identités partagent le provider et le handle, elle
 imprime la liste des UUID. Choisir celui de la personne (par exemple celui dont la date de
 création correspond à la demande) et le passer à `erase-identity-id`. Ne jamais prendre le
@@ -69,16 +74,39 @@ Jamais de SQL manuel : une écriture directe serait un troisième écrivain à c
 worker, et le registre perdrait la garantie qu'une action n'est payée qu'une fois. Les commandes
 passent par le même code que le service.
 
-Le plus sûr est de partir du CronJob de purge : il porte déjà `DATABASE_URL`, `ERASURE_PEPPER`,
-`PURGE_CONFIRM` et la bonne image worker. On crée un Job à partir de ce modèle en remplaçant la
-commande, sans toucher au CronJob lui-même.
+Le chemin le plus simple est de partir du CronJob de purge : il porte déjà `DATABASE_URL`,
+`ERASURE_PEPPER`, `PURGE_CONFIRM` et la bonne image worker. Mais ce CronJob est optionnel dans le
+chart (`purge.enabled`, faux par défaut) : la première étape est de vérifier qu'il existe.
 
 ```bash
-# 1. Le nom exact du CronJob et l'espace de noms du déploiement.
+# 1. Le CronJob de purge existe-t-il ? Noter son nom exact et l'espace de noms.
+helm get values <release> -n <namespace> | grep purge
 kubectl get cronjob -n <namespace>
+```
 
+Si aucun CronJob de purge n'apparaît, deux voies :
+
+- l'activer le temps de l'opération :
+  `helm upgrade <release> <chart> -n <namespace> --reuse-values --set purge.enabled=true`,
+  exécuter, puis remettre `purge.enabled` à `false`. C'est un changement de déploiement : il se
+  consigne, et il ne se fait qu'avec l'accord de l'exploitant ;
+- créer un Job autonome qui porte les trois réglages, chacun lu dans son Secret. Les noms viennent
+  des valeurs du chart : `postgres.secretName` et `postgres.urlKey` pour `DATABASE_URL`,
+  `erasure.pepperSecretName` et `erasure.pepperKey` pour `ERASURE_PEPPER`, `purge.secretName`
+  (ou le Secret que le chart crée, `<fullname>-purge`) et `purge.secretKey` pour `PURGE_CONFIRM`.
+  Les trois variables sont obligatoires : sans `DATABASE_URL` rien ne démarre, sans
+  `ERASURE_PEPPER` un effacement refuse, sans `PURGE_CONFIRM` la purge refuse. La valeur attendue
+  de `PURGE_CONFIRM` est `purge-ashuworld`.
+
+Avec le nom relevé à l'étape 1 :
+
+```bash
 # 2. Un Job ponctuel dérivé du CronJob, commande remplacée, appliqué sans passer par un fichier.
-kubectl create job --from=cronjob/<release>-purge droits-2026-11-15 \
+# Le nom est celui de `ashuworld.fullname` suivi de -purge : <release> seul quand le nom de
+# release contient déjà « ashuworld », sinon <release>-ashuworld. Ne pas le deviner : recopier
+# celui que l'étape 1 a affiché.
+CRONJOB='nom-releve-etape-1'
+kubectl create job --from=cronjob/$CRONJOB droits-2026-11-15 \
   --dry-run=client -o yaml \
   | kubectl patch --local -f - --type=json \
       -p '[{"op":"replace","path":"/spec/template/spec/containers/0/command","value":["node","dist/worker.js","export-fan","<handle>"]}]' \
@@ -93,13 +121,11 @@ kubectl delete job droits-2026-11-15 -n <namespace>
 Remplacer la valeur de `command` par la commande voulue, par exemple
 `["node","dist/worker.js","erase-fan","<handle>"]` ou
 `["node","dist/worker.js","purge","--dry-run"]`. Pour une purge réelle, aucun remplacement n'est
-nécessaire : `kubectl create job --from=cronjob/<release>-purge purge-manuel -n <namespace>`
-suffit. Lancer toujours `purge --dry-run` avant une purge réelle et lire les compteurs.
+nécessaire : `kubectl create job --from=cronjob/$CRONJOB purge-manuel -n <namespace>` suffit.
+Lancer toujours `purge --dry-run` avant une purge réelle et lire les compteurs.
 
-Une autre exécution ponctuelle de l'image worker fonctionne, à condition de lui fournir les
-mêmes deux variables, `DATABASE_URL` et `ERASURE_PEPPER`, par référence à leurs Secrets. Ne
-jamais les écrire en clair dans une ligne de commande : elles resteraient dans l'historique du
-shell et dans `kubectl describe`.
+Ne jamais écrire un secret en clair dans une ligne de commande : il resterait dans l'historique du
+shell et dans `kubectl describe`. Les trois variables se lisent par `secretKeyRef`.
 
 Le code de sortie est 0 en cas de succès et non nul en cas de refus. Un refus n'a rien écrit :
 l'exploitant peut corriger l'argument et relancer.
