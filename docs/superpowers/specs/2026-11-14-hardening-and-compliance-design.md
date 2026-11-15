@@ -1,6 +1,7 @@
 # AshuWorld — hardening, legal compliance and documentation alignment
 
-Status: design for approval. Alpha; the data is still expected to be wiped before launch.
+Status: approved 2026-11-14. Alpha; the data is still expected to be wiped before launch. The
+security, legal and documentation branches are implemented; the refactor branch is the last one.
 
 This design sits beside the game design in
 [`2026-11-14-ashuworld-fan-xp-design.md`](2026-11-14-ashuworld-fan-xp-design.md). That one
