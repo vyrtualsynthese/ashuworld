@@ -70,6 +70,12 @@ how clean the code is:
 6. A Dachi holds at most one identity per provider, never ends with zero identities, and can never
    read or act on another Dachi's data.
 7. A session cookie is issued only after a provider has proven who the Dachi is.
+8. The acceptance of the CGU and the 15-year declaration is recorded once at sign-in and never
+   overwritten. `recordTermsAcceptance` carries the `terms_accepted_at is null` guard; a later
+   sign-in with a newer `TERMS_VERSION` is a no-op, not a rewrite.
+9. Erasure anonymises and never deletes an XP row. The one-time `(identity_id, action_key)` key
+   lives on the earn, so after `erase-fan` or `erase-identity` the rows are forfeited and kept:
+   a spent key stays spent, and re-linking the same platform account cannot pay again.
 
 If a change seems to need one of these relaxed, open an issue first. The design document explains
 why each exists.
@@ -88,6 +94,19 @@ The product speaks to Dachis, not to engineers. When you write user-facing text:
 - Never promise something the ledger does not do. Three bugs in the first implementation were
   copy that implied re-attaching recovers forfeited XP. It does not.
 - Server error text is not a user message. Map codes to our own words in the app.
+
+## Legal text
+
+The mentions légales, the privacy notice and the CGU live in `apps/web/src/legal/content.ts`, one
+exported document each, rendered by the same page component. They are code: review them like
+code.
+
+- Changing what a document says bumps `TERMS_VERSION`. It is the version recorded with each
+  Dachi's first acceptance, so an edit under the old value would make the record point at text
+  nobody agreed to.
+- The privacy notice describes only what the code does. Before it claims a retention window, a
+  deletion, a cookie or an export, find the constant or the command that performs it. A sentence
+  that promises more is a defect, like a failing test, and it is fixed like one.
 
 ## Security
 
