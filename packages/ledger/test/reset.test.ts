@@ -97,6 +97,9 @@ describe('resetAlpha', () => {
     const ada = await seedFan('ada', 120, 3)
     await seedFan('linus', 40, 2)
     await seedWipeable(ada)
+    await db.pool.query(
+      `insert into platform_tokens (provider, refresh_token) values ('twitch', 'v1:iv:tag:body')`,
+    )
     process.env[ALPHA_RESET_CONFIRM_ENV] = ALPHA_RESET_CONFIRM_VALUE
 
     const result = await resetAlpha(db.pool, { configVersion: '2026-11-14.1' })
@@ -116,6 +119,9 @@ describe('resetAlpha', () => {
     // The accounts survive: a launch wipe resets the game, it does not delete the fans
     // who signed up during the alpha.
     expect(await count('fans')).toBe(2)
+    // The channel grant survives too: it is operator configuration, not fan data, so the
+    // wipe must not force the operator to re-authorize the channel.
+    expect(await count('platform_tokens')).toBe(1)
     const { rows } = await db.pool.query<{ handle: string }>('select handle from fans order by handle')
     expect(rows.map((row) => row.handle)).toEqual(['ada', 'linus'])
 

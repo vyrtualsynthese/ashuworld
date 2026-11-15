@@ -64,6 +64,7 @@ describe('schema', () => {
         'sessions',
         'audit_log',
         'oauth_handshakes',
+        'platform_tokens',
       ]),
     )
   })
@@ -71,7 +72,7 @@ describe('schema', () => {
   it('is idempotent', async () => {
     await expect(migrate(db.pool)).resolves.toBeUndefined()
     const { rows } = await db.pool.query<{ n: string }>('select count(*)::text as n from _migrations')
-    expect(rows[0]?.n).toBe('5')
+    expect(rows[0]?.n).toBe('6')
   })
 
   it('records the applied files by name', async () => {
@@ -82,6 +83,7 @@ describe('schema', () => {
       '0003_ladder_indexes.sql',
       '0004_inbound_claim_index.sql',
       '0005_consent_retention_erasure.sql',
+      '0006_platform_tokens.sql',
     ])
   })
 
@@ -275,7 +277,7 @@ describe('migration runner', () => {
       // re-check inside the lock makes it skip instead of replaying the file.
       await Promise.all([migrate(fresh.pool), migrate(fresh.pool)])
       const { rows } = await fresh.pool.query<{ n: string }>('select count(*)::text as n from _migrations')
-      expect(rows[0]?.n).toBe('5')
+      expect(rows[0]?.n).toBe('6')
       const { rows: fans } = await fresh.pool.query<{ n: string }>("select count(*)::text as n from pg_tables where schemaname = current_schema() and tablename = 'fans'")
       expect(fans[0]?.n).toBe('1')
     } finally {
@@ -299,6 +301,7 @@ describe('migration runner', () => {
         '0003_ladder_indexes.sql',
         '0004_inbound_claim_index.sql',
         '0005_consent_retention_erasure.sql',
+        '0006_platform_tokens.sql',
       ])
       await migrate(fresh.pool)
       const { rows } = await fresh.pool.query<{ name: string }>('select name from _migrations order by 1')
@@ -308,6 +311,7 @@ describe('migration runner', () => {
         '0003_ladder_indexes.sql',
         '0004_inbound_claim_index.sql',
         '0005_consent_retention_erasure.sql',
+        '0006_platform_tokens.sql',
       ])
       const { rows: tables } = await fresh.pool.query<{ tablename: string }>(
         `select tablename from pg_tables where schemaname = current_schema() order by 1`,
