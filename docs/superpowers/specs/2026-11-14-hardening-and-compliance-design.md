@@ -339,9 +339,10 @@ to the operator, and the audit trail.
 
 ### Branch 3 — `docs/alignment`
 
-- **README**: the test database port (Compose publishes 5432, the docs say 55432 — decide
-  one and use it everywhere), the new environment variables and CLI commands, a
-  "Documents légaux" section, and an index of the design and legal documents.
+- **README**: the two database ports, recorded as a decision rather than an inconsistency:
+  `5432` is the Compose dev stack and `55432` is the dedicated test database (container
+  `ashuworld-pg`), and the README states both. Also the new environment variables and CLI
+  commands, a "Documents légaux" section, and an index of the design and legal documents.
 - **CONTRIBUTING**: the same port; a rule that user-facing legal text is product copy and
   changes with its version; the new non-negotiables (consent recorded, erasure anonymises).
 - **CHANGELOG**: move the unbuilt platform adapters and operator tools out of "Added" into

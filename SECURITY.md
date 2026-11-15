@@ -26,7 +26,9 @@ The system holds fan identities and levels, so these are the areas worth probing
   provider id still readable after `erase-fan` or `erase-identity`; or a retention window that
   does not delete what the documentation says it deletes. The erasure pepper belongs here too: a
   leak of `ERASURE_PEPPER`, or its value appearing in a manifest, a log or a repository file,
-  makes every stored pseudonym matchable back to a real provider account.
+  lets anyone test a candidate provider account id against every stored pseudonym. That is a
+  one-way comparison — the hash is not reversed — but it is enough to match a real account to
+  its row.
 - **Rate limiting**: a way to bypass the configured limits — a key the caller can choose, a path
   that skips its bucket, a limit that silently does nothing, or a window that can be reset by the
   client.

@@ -36,7 +36,7 @@ numbers can be tuned against real behaviour.
 | `packages/providers` | Provider names and the identity shape shared by the API and the worker. |
 | `apps/api` | HTTP: sign-in, sessions, accounts, public ladder and profile. |
 | `apps/web` | React app: ladder, profile, account page, and the three legal pages (mentions légales, confidentialité, CGU). |
-| `apps/worker` | Queue loop: claims platform events, awards them, retries a bounded number of times. Operator commands: `export-fan`, `erase-fan`, `erase-identity`, `erase-identity-id`, `purge`. |
+| `apps/worker` | Queue loop: claims platform events, awards them, retries a bounded number of times. Operator commands: `export-fan`, `erase-fan`, `erase-identity`, `erase-identity-id`, `purge`, `reset`, `recompute-levels`. |
 | `deploy/helm/ashuworld` | The chart: deployments, ingress, migration and reset jobs. |
 | `docker/` | Three images: esbuild bundles, non-root, read-only root filesystem. |
 
@@ -182,8 +182,9 @@ pnpm --filter @ashuworld/worker dev    # :9230 inspector, watches too
 
 ## Configuration
 
-The api reads these from the environment. The worker also reads `DATABASE_URL` and
-`ERASURE_PEPPER`; its connector switches are in `.env.example` and its confirm tokens in
+The api reads these from the environment. The worker also reads `DATABASE_URL`, `ERASURE_PEPPER`
+and `GAME_CONFIG_VERSION` (the version the alpha reset records, which the chart sets from
+`game.configVersion`); its connector switches are in `.env.example` and its confirm tokens in
 `values.yaml`. A variable with no default stops the process at startup instead of leaving it
 half configured.
 
