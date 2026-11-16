@@ -5,7 +5,7 @@
 # also why it installs nothing: `pnpm install` on the host is what provides the dependency
 # tree, and a container that installed its own copy would be the copy the editor does not
 # see.
-FROM node:22-slim
+FROM node:26-slim
 
 RUN npm install --global pnpm@10.34.9
 
