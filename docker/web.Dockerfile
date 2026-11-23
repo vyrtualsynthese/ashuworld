@@ -45,7 +45,7 @@ ENV VITE_DEV_LOGIN=${VITE_DEV_LOGIN}
 # request in production.
 RUN pnpm --filter @ashuworld/web build
 
-FROM nginx:1.29-alpine AS runtime
+FROM nginx:1.31-alpine AS runtime
 
 # The server block is a template: the api Service name is a release-time fact, so nginx's
 # entrypoint renders it into /tmp at container start. /tmp is an `emptyDir` in the chart,
