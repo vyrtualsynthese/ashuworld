@@ -8,7 +8,7 @@
 # platform, so the build works on amd64 and arm64 alike. Re-resolve when the Helm
 # version the chart is checked against changes, and keep it equal to the tarball
 # `ci.yml` installs so a local check and CI run the same binary.
-FROM alpine/helm:4.2.4@sha256:76c375eed56144c68d6197c55bc5a4552fb42002190b796729901cbab3ae6e51
+FROM alpine/helm:4.3.2@sha256:a3b9d617c0c30a6c488cebb429c4ba83995a26dc2184599af5fd408a361b2e67
 
 RUN apk add --no-cache bash
 
